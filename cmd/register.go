@@ -5,8 +5,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func RegisterNode(authToken string) {
-	api.RegisterNode(authToken)
+func RegisterNode(token string) {
+	api.RegisterNode(token)
 }
 
 var registerCmd = &cobra.Command{

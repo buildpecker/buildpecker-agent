@@ -1,22 +1,35 @@
 package api
 
-import "fmt"
+import (
+	"fmt"
+	"os"
 
-func RegisterNode(authToken string) {
+	"github.com/pthsarmah/forge/internal/system"
+)
+
+func RegisterNode(token string) {
+	cpuCores := system.GetCPUCores()
+	memoryMb := system.GetMemorySizeInMB()
+	diskMb := system.GetDiskSizeInMB()
+	hostname := system.GetHostname()
+
 	data := map[string]any{
-		"path": "users/queries:findOneByAuthToken",
+		"path": "nodes/actions:registerNode",
 		"args": map[string]any{
-			"authToken": authToken,
+			"token":    token,
+			"cpuCores": cpuCores,
+			"memoryMb": memoryMb,
+			"diskMb":   diskMb,
+			"hostname": hostname,
 		},
 		"format": "json",
 	}
 
-	status, successData, errorData := Post("api/query", "application/json", data)
-
-	switch status {
-	case 0:
-		fmt.Print(errorData)
-	case 1:
-		fmt.Print(successData)
+	status, _, errorData := Post("api/action", "application/json", data)
+	if status != 1 {
+		fmt.Fprintf(os.Stderr, "Registration failed: '%s'\n", errorData)
+		return
 	}
+
+	fmt.Println("Node successfully registered!")
 }
