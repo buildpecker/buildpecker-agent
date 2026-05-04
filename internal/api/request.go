@@ -22,9 +22,9 @@ func Post(
 	data ctypes.ConvexRequestBody,
 	headers map[string]string,
 ) (int, ctypes.APISuccessResponse, ctypes.APIErrorResponse, error) {
-	baseURL := strings.TrimRight(os.Getenv("CONVEX_PUBLIC_URL"), "/")
+	baseURL := strings.TrimRight(os.Getenv("CONVEX_CLOUD_URL"), "/")
 	if baseURL == "" {
-		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("CONVEX_PUBLIC_URL is empty")
+		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("CONVEX_CLOUD_URL is empty")
 	}
 
 	url := baseURL + "/" + strings.TrimLeft(path, "/")
