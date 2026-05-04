@@ -4,47 +4,83 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strings"
+
+	ctypes "github.com/pthsarmah/forge/types"
 )
 
 // -1 - other failure (connection reset, transport failure)
 // 0 - http failure
 // 1 - success
 
-var dbUrl = os.Getenv("CONVEX_PUBLIC_URL")
-
-func Post(path string, contentType string, data map[string]any) (int, APISucessResponse, APIErrorResponse) {
-
-	dbUrl := os.Getenv("CONVEX_PUBLIC_URL")
-	url := dbUrl + "/" + path
-
-	body, err := json.Marshal(&data)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error while marshalling json for POST: '%s'\n", err)
-		return -1, APISucessResponse{}, APIErrorResponse{}
+func Post(
+	path string,
+	contentType string,
+	data ctypes.ConvexRequestBody,
+	headers map[string]string,
+) (int, ctypes.APISuccessResponse, ctypes.APIErrorResponse, error) {
+	baseURL := strings.TrimRight(os.Getenv("CONVEX_PUBLIC_URL"), "/")
+	if baseURL == "" {
+		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("CONVEX_PUBLIC_URL is empty")
 	}
 
-	res, err := http.Post(url, contentType, bytes.NewBuffer(body))
+	url := baseURL + "/" + strings.TrimLeft(path, "/")
+
+	body, err := json.Marshal(data)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error in POST request: '%s'\n", err)
-		return -1, APISucessResponse{}, APIErrorResponse{}
+		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("create request: %w", err)
+	}
+
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Accept", "application/json")
+
+	for key, val := range headers {
+		req.Header.Set(key, val)
+	}
+
+	res, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("execute request: %w", err)
 	}
 	defer res.Body.Close()
 
-	//http error
-	if res.StatusCode >= 400 {
-		apiData, err := CreateErrorResponse(res, data)
-		if err != nil {
-			return -1, APISucessResponse{}, APIErrorResponse{}
-		}
-		return 0, APISucessResponse{}, apiData
+	raw, err := io.ReadAll(res.Body)
+	if err != nil {
+		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("read response body: %w", err)
 	}
 
-	//http success
-	apiData, err := CreateSuccessResponse(res, data)
-	if err != nil {
-		return -1, APISucessResponse{}, APIErrorResponse{}
+	var env ctypes.APIEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("decode response envelope: %w", err)
 	}
-	return 1, apiData, APIErrorResponse{}
+
+	switch env.Status {
+	case "success":
+		var ok ctypes.APISuccessResponse
+		if err := json.Unmarshal(raw, &ok); err != nil {
+			return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("decode success response: %w", err)
+		}
+		return 1, ok, ctypes.APIErrorResponse{}, nil
+
+	case "error":
+		var apiErr ctypes.APIErrorResponse
+		if err := json.Unmarshal(raw, &apiErr); err != nil {
+			return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("decode error response: %w", err)
+		}
+		return 0, ctypes.APISuccessResponse{}, apiErr, nil
+
+	default:
+		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("unknown response status: %q", env.Status)
+	}
 }
