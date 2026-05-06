@@ -9,6 +9,37 @@ import (
 	ctypes "github.com/pthsarmah/forge/types"
 )
 
+func GetAllNodes() (map[string]ctypes.NodeInfo, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error in reading home director: %v", err)
+		return nil, err
+	}
+
+	configPath := filepath.Join(homeDir, ".forge/config.json")
+	body, err := os.ReadFile(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
+		return nil, err
+	}
+
+	var cfg ctypes.Config
+
+	err = json.Unmarshal(body, &cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
+		return nil, err
+	}
+
+	if cfg.Nodes == nil {
+		err = fmt.Errorf("Config is empty")
+		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
+		return nil, err
+	}
+
+	return cfg.Nodes, nil
+}
+
 func IsNodeAlreadyConnectedToUser(userId string) (bool, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
