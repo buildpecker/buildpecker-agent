@@ -3,7 +3,7 @@ package docker
 import (
 	"fmt"
 
-	ctypes "github.com/pthsarmah/forge/types"
+	ctypes "github.com/pthsarmah/forge-agent/types"
 )
 
 func Deploy(dep ctypes.Deployment) error {

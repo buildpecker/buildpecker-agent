@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pthsarmah/forge/internal/system"
-	ctypes "github.com/pthsarmah/forge/types"
+	"github.com/pthsarmah/forge-agent/internal/system"
+	ctypes "github.com/pthsarmah/forge-agent/types"
 )
 
 func RegisterNode(token string) {

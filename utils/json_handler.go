@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	custom_errors "github.com/pthsarmah/forge/errors"
+	custom_errors "github.com/pthsarmah/forge-agent/errors"
 	"io"
 	"net/http"
 	"strings"

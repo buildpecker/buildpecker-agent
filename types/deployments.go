@@ -16,4 +16,5 @@ type Deployment struct {
 	ImageUri     string  `json:"imageUri"`
 	Branch       string  `json:"branch"`
 	Sha          string  `json:"sha"`
+	Project      Project `json:"project"`
 }

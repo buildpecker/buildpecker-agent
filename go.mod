@@ -1,4 +1,4 @@
-module github.com/pthsarmah/forge
+module github.com/pthsarmah/forge-agent-agent
 
 go 1.26.2
 

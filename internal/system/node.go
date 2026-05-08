@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	ctypes "github.com/pthsarmah/forge/types"
+	ctypes "github.com/pthsarmah/forge-agent/types"
 )
 
 func GetAllNodes() (map[string]ctypes.NodeInfo, error) {
@@ -16,7 +16,7 @@ func GetAllNodes() (map[string]ctypes.NodeInfo, error) {
 		return nil, err
 	}
 
-	configPath := filepath.Join(homeDir, ".forge/config.json")
+	configPath := filepath.Join(homeDir, ".forge-agent/config.json")
 	body, err := os.ReadFile(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)

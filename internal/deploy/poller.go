@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pthsarmah/forge/internal/api"
-	ctypes "github.com/pthsarmah/forge/types"
+	"github.com/pthsarmah/forge-agent/internal/api"
+	ctypes "github.com/pthsarmah/forge-agent/types"
 )
 
 func Start(ctx context.Context) error {
@@ -43,8 +43,23 @@ func Start(ctx context.Context) error {
 				continue
 			}
 			for _, dep := range deps {
+
+				var job ctypes.Job
+
+				if dep.Project.Framework == "" {
+					job = ctypes.Job{
+						Action: "start_detect",
+						Data:   dep,
+					}
+				} else {
+					job = ctypes.Job{
+						Action: "start_deploy",
+						Data:   dep,
+					}
+				}
+
 				select {
-				case jobs <- ctypes.Job{Action: "start_deploy", Data: dep}:
+				case jobs <- job:
 				case <-ctx.Done():
 					close(jobs)
 					wg.Wait()

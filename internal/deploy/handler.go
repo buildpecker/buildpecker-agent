@@ -4,13 +4,17 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/pthsarmah/forge/internal/api"
-	"github.com/pthsarmah/forge/internal/docker"
-	ctypes "github.com/pthsarmah/forge/types"
+	"github.com/pthsarmah/forge-agent/internal/api"
+	"github.com/pthsarmah/forge-agent/internal/docker"
+	ctypes "github.com/pthsarmah/forge-agent/types"
 )
 
 func Handler(event string, args ...any) {
 	switch event {
+	case "start_detect":
+		break
+	case "start_build":
+		break
 	case "start_deploy":
 		if len(args) == 0 {
 			fmt.Fprintf(os.Stderr, "No deployment provided for start_deploy")

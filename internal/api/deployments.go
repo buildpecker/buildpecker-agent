@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pthsarmah/forge/internal/system"
-	ctypes "github.com/pthsarmah/forge/types"
+	"github.com/pthsarmah/forge-agent/internal/system"
+	ctypes "github.com/pthsarmah/forge-agent/types"
 )
 
 // TODO: convert status from string to a validated type later

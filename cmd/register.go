@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/pthsarmah/forge/internal/api"
+	"github.com/pthsarmah/forge-agent/internal/api"
 	"github.com/spf13/cobra"
 )
 
