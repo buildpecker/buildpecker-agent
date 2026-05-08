@@ -44,10 +44,19 @@ func RegisterNode(token string) {
 	nodeId := fmt.Sprintf("%v", successData.Value["nodeId"])
 
 	flag, err := system.IsNodeAlreadyConnectedToUser(userId)
-	if err != nil || flag == false {
+	if flag == "connected" {
 		fmt.Print("Node already exists for this user. Deleting new entry...")
 		DeleteNode(nodeId, nodeToken)
 		return
+	}
+
+	//only let code go through if the file not exists / not connected
+	if flag != "no_file" && flag != "not_connected" {
+		return
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v", err)
 	}
 
 	err = system.SaveNodeInfo(nodeToken, userId, nodeId)

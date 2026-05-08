@@ -2,6 +2,7 @@ package system
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,7 +17,7 @@ func GetAllNodes() (map[string]ctypes.NodeInfo, error) {
 		return nil, err
 	}
 
-	configPath := filepath.Join(homeDir, ".forge-agent/config.json")
+	configPath := filepath.Join(homeDir, ".forge/config.json")
 	body, err := os.ReadFile(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
@@ -40,18 +41,21 @@ func GetAllNodes() (map[string]ctypes.NodeInfo, error) {
 	return cfg.Nodes, nil
 }
 
-func IsNodeAlreadyConnectedToUser(userId string) (bool, error) {
+func IsNodeAlreadyConnectedToUser(userId string) (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error in reading home director: %v", err)
-		return false, err
+		fmt.Fprintf(os.Stderr, "Error in reading home directory: %v", err)
+		return "", err
 	}
 
 	configPath := filepath.Join(homeDir, ".forge/config.json")
 	body, err := os.ReadFile(configPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "no_file", err
+		}
 		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
-		return false, err
+		return "", err
 	}
 
 	var cfg ctypes.Config
@@ -59,21 +63,21 @@ func IsNodeAlreadyConnectedToUser(userId string) (bool, error) {
 	err = json.Unmarshal(body, &cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
-		return false, err
+		return "", err
 	}
 
 	if cfg.Nodes == nil {
 		err = fmt.Errorf("Config is empty")
 		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
-		return false, err
+		return "", err
 	}
 
 	_, ok := cfg.Nodes[userId]
 	if ok {
-		return false, nil
+		return "not_connected", nil
 	}
 
-	return true, nil
+	return "connected", nil
 }
 
 func SaveNodeInfo(nodeToken string, userId string, nodeId string) error {

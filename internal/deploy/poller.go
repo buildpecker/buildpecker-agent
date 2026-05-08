@@ -43,23 +43,8 @@ func Start(ctx context.Context) error {
 				continue
 			}
 			for _, dep := range deps {
-
-				var job ctypes.Job
-
-				if dep.Project.Framework == "" {
-					job = ctypes.Job{
-						Action: "start_detect",
-						Data:   dep,
-					}
-				} else {
-					job = ctypes.Job{
-						Action: "start_deploy",
-						Data:   dep,
-					}
-				}
-
 				select {
-				case jobs <- job:
+				case jobs <- ctypes.Job{Action: "start_deploy", Data: dep}:
 				case <-ctx.Done():
 					close(jobs)
 					wg.Wait()
