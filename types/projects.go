@@ -1,6 +1,7 @@
 package ctypes
 
 type Project struct {
+	Id            string `json:"_id"`
 	Name          string `json:"name"`
 	OwnerId       string `json:"ownerId"`
 	Framework     string `json:"framework"`

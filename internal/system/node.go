@@ -13,29 +13,25 @@ import (
 func GetAllNodes() (map[string]ctypes.NodeInfo, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error in reading home director: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("Error in reading home director: %v", err)
 	}
 
 	configPath := filepath.Join(homeDir, ".forge/config.json")
 	body, err := os.ReadFile(configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("Error in reading config file: %v", err)
 	}
 
 	var cfg ctypes.Config
 
 	err = json.Unmarshal(body, &cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("Error in reading config file: %v", err)
 	}
 
 	if cfg.Nodes == nil {
 		err = fmt.Errorf("Config is empty")
-		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("Error in reading config file: %v", err)
 	}
 
 	return cfg.Nodes, nil
@@ -44,32 +40,28 @@ func GetAllNodes() (map[string]ctypes.NodeInfo, error) {
 func IsNodeAlreadyConnectedToUser(userId string) (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error in reading home directory: %v", err)
-		return "", err
+		return "", fmt.Errorf("Error in reading home directory: %v", err)
 	}
 
 	configPath := filepath.Join(homeDir, ".forge/config.json")
 	body, err := os.ReadFile(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "no_file", err
+			return "no_file", nil
 		}
-		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
-		return "", err
+		return "", fmt.Errorf("Error in reading config file: %v", err)
 	}
 
 	var cfg ctypes.Config
 
 	err = json.Unmarshal(body, &cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
-		return "", err
+		return "", fmt.Errorf("Error in reading config file: %v", err)
 	}
 
 	if cfg.Nodes == nil {
 		err = fmt.Errorf("Config is empty")
-		fmt.Fprintf(os.Stderr, "Error in reading config file: %v", err)
-		return "", err
+		return "", fmt.Errorf("Error in reading config file: %v", err)
 	}
 
 	_, ok := cfg.Nodes[userId]
@@ -83,26 +75,26 @@ func IsNodeAlreadyConnectedToUser(userId string) (string, error) {
 func SaveNodeInfo(nodeToken string, userId string, nodeId string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return err
+
 	}
 
 	configDir := filepath.Join(homeDir, ".forge")
 
 	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return err
+
 	}
 
 	configPath := filepath.Join(configDir, "config.json")
 
 	file, err := os.OpenFile(configPath, os.O_RDWR|os.O_CREATE, 0664)
 	if err != nil {
-		return err
+
 	}
 
 	stat, err := file.Stat()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Could not stat file '%s'", err)
-		return err
+		return fmt.Errorf("Could not stat file '%s'", err)
+
 	}
 
 	var cfg ctypes.Config
@@ -111,14 +103,12 @@ func SaveNodeInfo(nodeToken string, userId string, nodeId string) error {
 		//read file
 		data, err := os.ReadFile(configPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Could not read file '%s'", err)
-			return err
+			return fmt.Errorf("Could not read file '%s'", err)
 		}
 
 		err = json.Unmarshal(data, &cfg)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Could not unmarshal to config struct '%s'", err)
-			return err
+			return fmt.Errorf("Could not unmarshal to config struct '%s'", err)
 		}
 	}
 
@@ -135,26 +125,22 @@ func SaveNodeInfo(nodeToken string, userId string, nodeId string) error {
 
 	newData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error in marshalling new data '%s'", err)
-		return err
+		return fmt.Errorf("Error in marshalling new data '%s'", err)
 	}
 
 	err = file.Truncate(0)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error in truncating file '%s'", err)
-		return err
+		return fmt.Errorf("Error in truncating file '%s'", err)
 	}
 
 	_, err = file.Seek(0, 0)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error in seeking file '%s'", err)
-		return err
+		return fmt.Errorf("Error in seeking file '%s'", err)
 	}
 
 	_, err = file.Write(newData)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error in writing new data '%s'", err)
-		return err
+		return fmt.Errorf("Error in writing new data '%s'", err)
 	}
 
 	fmt.Println("Updated config!")

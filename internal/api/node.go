@@ -11,7 +11,7 @@ import (
 	ctypes "github.com/pthsarmah/forge-agent/types"
 )
 
-func RegisterNode(token string) {
+func RegisterNode(token string) error {
 	cpuCores := system.GetCPUCores()
 	memoryMb := system.GetMemorySizeInMB()
 	diskMb := system.GetDiskSizeInMB()
@@ -31,12 +31,10 @@ func RegisterNode(token string) {
 
 	status, successData, errorData, err := Post("api/action", "application/json", data, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Registration failed: '%s'\n", err)
-		return
+		return fmt.Errorf("Registration failed: '%s'\n", err)
 	}
 	if status != 1 {
-		fmt.Fprintf(os.Stderr, "Registration failed: '%s'\n", errorData)
-		return
+		return fmt.Errorf("Registration failed: '%s'\n", errorData)
 	}
 
 	nodeToken := fmt.Sprintf("%v", successData.Value["nodeToken"])
@@ -47,37 +45,32 @@ func RegisterNode(token string) {
 	if flag == "connected" {
 		fmt.Print("Node already exists for this user. Deleting new entry...")
 		DeleteNode(nodeId, nodeToken)
-		return
-	}
-
-	//only let code go through if the file not exists / not connected
-	if flag != "no_file" && flag != "not_connected" {
-		return
+		return fmt.Errorf("Node already connected")
 	}
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v", err)
+		return fmt.Errorf("%v", err)
 	}
 
 	err = system.SaveNodeInfo(nodeToken, userId, nodeId)
 
 	if err != nil {
 		DeleteNode(nodeId, nodeToken)
-		return
+		return fmt.Errorf("Error in saving node: %v", err)
 	}
 
 	fmt.Println("Node successfully registered!")
+	return nil
 }
 
-func DeleteNode(nodeId string, nodeToken string) {
+func DeleteNode(nodeId string, nodeToken string) error {
 	client := http.Client{}
 	baseUrl := strings.TrimRight(os.Getenv("CONVEX_SITE_URL"), "/")
 	url := baseUrl + "/nodes/delete-node"
 
 	req, err := http.NewRequest("POST", url, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating request: %s", err)
-		return
+		return fmt.Errorf("Error creating request: %s", err)
 	}
 
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", nodeToken))
@@ -86,17 +79,17 @@ func DeleteNode(nodeId string, nodeToken string) {
 
 	res, err := client.Do(req)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error in generating response '%s'", err)
-		return
+		return fmt.Errorf("Error in generating response '%s'", err)
 	}
 	defer res.Body.Close()
 
 	_, err = io.ReadAll(res.Body)
 	if err != nil {
-		return
 	}
 
 	if res.StatusCode >= 400 {
-		fmt.Fprintf(os.Stderr, "Error in deleting node")
+		return fmt.Errorf("Error in deleting node")
 	}
+
+	return nil
 }

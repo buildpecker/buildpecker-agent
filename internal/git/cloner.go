@@ -4,32 +4,37 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
+	"strings"
 )
 
-func CloneRepo(repoUrl string, path string) {
+func CloneRepo(repoUrl string) (string, error) {
+
+	repo := path.Base(repoUrl)
+	path := strings.TrimSuffix(repo, ".git")
+
 	dir, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to fetch homedir %v", err)
+		return "", fmt.Errorf("Failed to fetch homedir %v", err)
 	}
 	projectDir := dir + "/forge"
 	if err = os.MkdirAll(projectDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create directory %v", err)
+		return "", fmt.Errorf("Failed to create directory %v", err)
 	}
 	pathDir := projectDir + "/" + path
 	_, err = os.Stat(pathDir)
 	if err == nil {
-		fmt.Fprintf(os.Stderr, "Repository already exists in path. Not cloning...")
+		return pathDir, fmt.Errorf("Repository already exists in path. Not cloning...\n")
 	}
 
 	cmd := exec.Command("git", "clone", repoUrl, pathDir)
 
-	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to clone repo %s: %v", repoUrl, err)
-		return
+		return "", fmt.Errorf("Failed to clone repo %s: %v\n", repoUrl, err)
 	}
 
-	fmt.Print("Repository cloned successfully!")
+	fmt.Print("Repository cloned successfully!\n")
+	return pathDir, nil
 }

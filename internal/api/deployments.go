@@ -30,7 +30,7 @@ func SetDeploymentStatus(dep ctypes.Deployment, status string) error {
 		return fmt.Errorf("marshal body: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
