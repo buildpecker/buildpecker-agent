@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/pthsarmah/forge-agent/internal/api"
+	"github.com/pthsarmah/forge-agent/internal/docker"
 	"github.com/pthsarmah/forge-agent/internal/git"
 	ctypes "github.com/pthsarmah/forge-agent/types"
 )
@@ -37,7 +38,11 @@ func Handler(event string, args ...any) {
 				fmt.Fprintf(os.Stderr, "%v", err)
 			}
 
-			fmt.Printf("This project is based on %v framework\n", framework)
+			//set repo framework
+			err = api.SetProjectFramework(dep, framework)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v", err)
+			}
 
 			//set deployment status to processing
 			err = api.SetDeploymentStatus(dep, "processing")
@@ -45,10 +50,8 @@ func Handler(event string, args ...any) {
 				fmt.Fprintf(os.Stderr, "%v", err)
 			}
 
-			err = api.SetProjectFramework(dep, framework)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%v", err)
-			}
+			//deploy
+			err = docker.Deploy(dep, path, framework)
 
 		default:
 			fmt.Fprintf(os.Stderr, "Invalid deployment provided for start_deploy")
