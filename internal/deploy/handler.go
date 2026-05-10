@@ -28,7 +28,7 @@ func Handler(event string, args ...any) {
 			dep := args[0].(ctypes.Deployment)
 			//clone repo if not already cloned
 			path, err := git.CloneRepo(dep.Project.RepoUrl)
-			if err != nil {
+			if err != nil && path == "" {
 				fmt.Fprintf(os.Stderr, "%v", err)
 			}
 
@@ -37,12 +37,19 @@ func Handler(event string, args ...any) {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%v", err)
 			}
+			fmt.Printf("This project is based on %s framework\n", framework)
 
 			//set repo framework
 			err = api.SetProjectFramework(dep, framework)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%v", err)
 			}
+
+			envs, err := api.GetEnvironmentSecrets(dep)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v", err)
+			}
+			fmt.Printf("Got environment secrets!\n")
 
 			//set deployment status to processing
 			err = api.SetDeploymentStatus(dep, "processing")
@@ -51,7 +58,10 @@ func Handler(event string, args ...any) {
 			}
 
 			//deploy
-			err = docker.Deploy(dep, path, framework)
+			err = docker.Deploy(dep, envs, path, framework)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v", err)
+			}
 
 		default:
 			fmt.Fprintf(os.Stderr, "Invalid deployment provided for start_deploy")
