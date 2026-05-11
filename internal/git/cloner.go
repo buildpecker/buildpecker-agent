@@ -11,7 +11,7 @@ import (
 func CloneRepo(repoUrl string) (string, error) {
 
 	repo := path.Base(repoUrl)
-	path := strings.TrimSuffix(repo, ".git")
+	path := strings.ToLower(strings.TrimSuffix(repo, ".git"))
 
 	dir, err := os.UserHomeDir()
 	if err != nil {

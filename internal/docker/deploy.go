@@ -58,6 +58,7 @@ func Deploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath string, fra
 			"run",
 			"-d",
 			"-p", "5555:3000",
+			"--name", fmt.Sprintf("%s", imageName),
 		}
 
 		for _, e := range envs {

@@ -2,7 +2,7 @@ package docker
 
 func CreateNextJSDockerfile() string {
 	return `
-ARG NODE_VERSION=24.13.0-slim
+ARG NODE_VERSION=22-bookworm-slim
 FROM node:${NODE_VERSION} AS dependencies
 WORKDIR /app
 COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* .npmrc* ./

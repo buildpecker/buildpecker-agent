@@ -63,6 +63,12 @@ func Handler(event string, args ...any) {
 				fmt.Fprintf(os.Stderr, "%v", err)
 			}
 
+			//set deployment status to completed
+			err = api.SetDeploymentStatus(dep, "completed")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v", err)
+			}
+
 		default:
 			fmt.Fprintf(os.Stderr, "Invalid deployment provided for start_deploy")
 			return
