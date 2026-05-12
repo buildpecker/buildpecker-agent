@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/pthsarmah/forge-agent/internal/api"
-	"github.com/pthsarmah/forge-agent/internal/docker"
+	//	"github.com/pthsarmah/forge-agent/internal/docker"
 	"github.com/pthsarmah/forge-agent/internal/git"
 	ctypes "github.com/pthsarmah/forge-agent/types"
 )
@@ -26,6 +26,13 @@ func Handler(event string, args ...any) {
 		switch args[0].(type) {
 		case ctypes.Deployment:
 			dep := args[0].(ctypes.Deployment)
+
+			//set deployment status to processing
+			err := api.SetDeploymentStatus(dep, "processing")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v", err)
+			}
+
 			//clone repo if not already cloned
 			path, err := git.CloneRepo(dep.Project.RepoUrl)
 			if err != nil && path == "" {
@@ -51,14 +58,8 @@ func Handler(event string, args ...any) {
 			}
 			fmt.Printf("Got environment secrets!\n")
 
-			//set deployment status to processing
-			err = api.SetDeploymentStatus(dep, "processing")
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%v", err)
-			}
-
 			//deploy
-			err = docker.Deploy(dep, envs, path, framework)
+			err = NixpackDeploy(dep, envs, path, framework)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%v", err)
 			}
