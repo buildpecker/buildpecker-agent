@@ -84,3 +84,57 @@ func Post(
 		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("unknown response status: %q", env.Status)
 	}
 }
+
+func CallHttpAction[T any](path string, data map[string]any, requiresAuthorization bool, nodeToken string, httpMethod string) (T, error) {
+
+	var result T
+
+	baseURL := strings.TrimRight(os.Getenv("CONVEX_SITE_URL"), "/")
+	if baseURL == "" {
+		return result, fmt.Errorf("CONVEX_SITE_URL is empty")
+	}
+	url := baseURL + path
+
+	var body []byte
+
+	if data != nil {
+		var err error
+		body, err = json.Marshal(data)
+		if err != nil {
+			return result, fmt.Errorf("marshal body: %w", err)
+		}
+	}
+
+	req, err := http.NewRequest(httpMethod, url, bytes.NewReader(body))
+	if err != nil {
+		return result, fmt.Errorf("create request: %w", err)
+	}
+	if requiresAuthorization {
+		req.Header.Set("Authorization", "Bearer "+nodeToken)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	res, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return result, fmt.Errorf("execute request: %w", err)
+	}
+	defer res.Body.Close()
+
+	raw, err := io.ReadAll(res.Body)
+	if err != nil {
+		return result, fmt.Errorf("read response body: %w", err)
+	}
+
+	if res.StatusCode >= 400 {
+		return result, fmt.Errorf("http %d: %s", res.StatusCode, string(raw))
+	}
+
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return result, fmt.Errorf("decode response: %w", err)
+		}
+	}
+
+	return result, nil
+}

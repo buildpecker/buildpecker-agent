@@ -1,15 +1,65 @@
 package api
 
 import (
+	"context"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"strings"
+	"sync"
+	"time"
 
 	"github.com/pthsarmah/forge-agent/internal/system"
 	ctypes "github.com/pthsarmah/forge-agent/types"
 )
+
+func SendHeartbeat(ctx context.Context) error {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case <-ticker.C:
+			nodes, err := system.GetAllNodes()
+			if err != nil {
+				fmt.Printf("failed to get nodes: %v\n", err)
+				continue
+			}
+
+			var wg sync.WaitGroup
+
+			for userID, node := range nodes {
+				wg.Add(1)
+
+				go func(id string, n ctypes.NodeInfo) {
+					defer wg.Done()
+
+					_, err := CallHttpAction[any](
+						"/nodes/heartbeat",
+						nil,
+						true,
+						n.NodeToken,
+						http.MethodPost,
+					)
+
+					if err != nil {
+						fmt.Printf(
+							"heartbeat failed for %s: %v\n",
+							id,
+							err,
+						)
+					} else {
+						fmt.Printf("heartbeat sent for user %s\n at time: %s", id, time.Now())
+					}
+
+				}(userID, node)
+			}
+
+			wg.Wait()
+		}
+	}
+}
 
 func RegisterNode(token string) error {
 	cpuCores := system.GetCPUCores()
@@ -44,7 +94,7 @@ func RegisterNode(token string) error {
 	flag, err := system.IsNodeAlreadyConnectedToUser(userId)
 	if flag == "connected" {
 		fmt.Print("Node already exists for this user. Deleting new entry...")
-		DeleteNode(nodeId, nodeToken)
+		DeleteNode(nodeToken)
 		return fmt.Errorf("Node already connected")
 	}
 
@@ -55,7 +105,7 @@ func RegisterNode(token string) error {
 	err = system.SaveNodeInfo(nodeToken, userId, nodeId)
 
 	if err != nil {
-		DeleteNode(nodeId, nodeToken)
+		DeleteNode(nodeToken)
 		return fmt.Errorf("Error in saving node: %v", err)
 	}
 
@@ -63,33 +113,7 @@ func RegisterNode(token string) error {
 	return nil
 }
 
-func DeleteNode(nodeId string, nodeToken string) error {
-	client := http.Client{}
-	baseUrl := strings.TrimRight(os.Getenv("CONVEX_SITE_URL"), "/")
-	url := baseUrl + "/nodes/delete-node"
-
-	req, err := http.NewRequest("POST", url, nil)
-	if err != nil {
-		return fmt.Errorf("Error creating request: %s", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", nodeToken))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	res, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("Error in generating response '%s'", err)
-	}
-	defer res.Body.Close()
-
-	_, err = io.ReadAll(res.Body)
-	if err != nil {
-	}
-
-	if res.StatusCode >= 400 {
-		return fmt.Errorf("Error in deleting node")
-	}
-
-	return nil
+func DeleteNode(nodeToken string) error {
+	_, err := CallHttpAction[any]("/nodes/delete-node", nil, true, nodeToken, http.MethodPost)
+	return err
 }

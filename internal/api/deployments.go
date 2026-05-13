@@ -1,59 +1,25 @@
 package api
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 
 	"github.com/pthsarmah/forge-agent/internal/system"
 	ctypes "github.com/pthsarmah/forge-agent/types"
 )
 
-// TODO: convert status from string to a validated type later
+// TODO: convert 'status' from string to a validated type later
 func SetDeploymentStatus(dep ctypes.Deployment, status string) error {
-	baseURL := strings.TrimRight(os.Getenv("CONVEX_SITE_URL"), "/")
-	if baseURL == "" {
-		return fmt.Errorf("CONVEX_SITE_URL is empty")
-	}
-	url := baseURL + "/deployments/status"
-
-	body, err := json.Marshal(map[string]any{
+	var data = map[string]any{
 		"id":     dep.Id,
 		"status": status,
-	})
-	if err != nil {
-		return fmt.Errorf("marshal body: %w", err)
 	}
+	_, err := CallHttpAction[any]("/deployments/status", data, true,
+		dep.NodeToken, http.MethodPatch)
 
-	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+dep.NodeToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	res, err := (&http.Client{}).Do(req)
-	if err != nil {
-		return fmt.Errorf("execute request: %w", err)
-	}
-	defer res.Body.Close()
-
-	raw, err := io.ReadAll(res.Body)
-	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	if res.StatusCode >= 400 {
-		return fmt.Errorf("http %d: %s", res.StatusCode, string(raw))
-	}
-
-	return nil
+	return err
 }
 
 func GetQueuedDeployments() ([]ctypes.Deployment, error) {
@@ -62,11 +28,7 @@ func GetQueuedDeployments() ([]ctypes.Deployment, error) {
 		return nil, fmt.Errorf("get all nodes: %w", err)
 	}
 
-	baseURL := strings.TrimRight(os.Getenv("CONVEX_SITE_URL"), "/")
-	if baseURL == "" {
-		return nil, fmt.Errorf("CONVEX_SITE_URL is empty")
-	}
-	url := baseURL + "/deployments/queued"
+	path := "/deployments/queued"
 
 	var (
 		wg  sync.WaitGroup
@@ -78,7 +40,7 @@ func GetQueuedDeployments() ([]ctypes.Deployment, error) {
 		wg.Add(1)
 		go func(info ctypes.NodeInfo) {
 			defer wg.Done()
-			deps, err := fetchDeploymentsForNode(url, info)
+			deps, err := fetchDeploymentsForNode(path, info)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "fetch queued for node %s: %v\n", info.NodeId, err)
 				return
@@ -93,40 +55,16 @@ func GetQueuedDeployments() ([]ctypes.Deployment, error) {
 	return all, nil
 }
 
-func fetchDeploymentsForNode(url string, info ctypes.NodeInfo) ([]ctypes.Deployment, error) {
-	body, err := json.Marshal(map[string]any{
+func fetchDeploymentsForNode(path string, info ctypes.NodeInfo) ([]ctypes.Deployment, error) {
+
+	var data = map[string]any{
 		"id": info.NodeId,
-	})
+	}
+
+	deps, err := CallHttpAction[[]ctypes.Deployment](path, data, true, info.NodeToken, http.MethodPost)
+
 	if err != nil {
-		return nil, fmt.Errorf("marshal body: %w", err)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+info.NodeToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	res, err := (&http.Client{}).Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("execute request: %w", err)
-	}
-	defer res.Body.Close()
-
-	raw, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response body: %w", err)
-	}
-
-	if res.StatusCode >= 400 {
-		return nil, fmt.Errorf("http %d: %s", res.StatusCode, string(raw))
-	}
-
-	var deps []ctypes.Deployment
-	if err := json.Unmarshal(raw, &deps); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, err
 	}
 
 	//add node token to deployment
