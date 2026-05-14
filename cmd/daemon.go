@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/pthsarmah/forge-agent/internal/api"
 	"github.com/pthsarmah/forge-agent/internal/deploy"
+	"github.com/pthsarmah/forge-agent/internal/metrics"
 	"github.com/spf13/cobra"
 )
 
@@ -21,9 +23,20 @@ var daemonCmd = &cobra.Command{
 		defer stop()
 
 		fmt.Println("forge-agent daemon started")
-		if err := api.SendHeartbeat(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			fmt.Fprintf(os.Stderr, "could not send heartbeat: %v", err)
-		}
+
+		go metrics.StartCollector(ctx, 5*time.Second)
+		go func() {
+			if err := metrics.Serve(ctx, ":2112"); err != nil {
+				fmt.Fprintf(os.Stderr, "metrics server: %v\n", err)
+			}
+		}()
+
+		go func() {
+			if err := api.SendHeartbeat(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				fmt.Fprintf(os.Stderr, "could not send heartbeat: %v\n", err)
+			}
+		}()
+
 		if err := deploy.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			fmt.Fprintf(os.Stderr, "daemon exited: %v\n", err)
 			os.Exit(1)
