@@ -2,16 +2,17 @@ package deploy
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/pthsarmah/forge-agent/internal/api"
 	ctypes "github.com/pthsarmah/forge-agent/types"
+	"github.com/pthsarmah/forge-agent/utils"
 )
 
 func Start(ctx context.Context) error {
+	logger, _ := utils.GetLoggerInstance()
+	logger.DeployLogger.Println("Deploy poller started")
 
 	jobs := make(chan ctypes.Job, 100)
 
@@ -33,19 +34,22 @@ func Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			logger.DeployLogger.Printf("Deploy poller stopping: %v", ctx.Err())
 			close(jobs)
 			wg.Wait()
 			return ctx.Err()
 		case <-ticker.C:
 			deps, err := api.GetQueuedDeployments()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error in getting queued deployments: %v", err)
+				logger.DeployLogger.Printf("Get queued deployments failed: %v", err)
 				continue
 			}
 			for _, dep := range deps {
 				select {
 				case jobs <- ctypes.Job{Action: "start_deploy", Data: dep}:
+					logger.DeployLogger.Printf("Enqueued deployment %s", dep.Id)
 				case <-ctx.Done():
+					logger.DeployLogger.Printf("Deploy poller stopping mid-enqueue: %v", ctx.Err())
 					close(jobs)
 					wg.Wait()
 					return ctx.Err()

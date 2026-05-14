@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	ctypes "github.com/pthsarmah/forge-agent/types"
+	"github.com/pthsarmah/forge-agent/utils"
 )
 
 var nixpackEnvs = map[string]string{
@@ -15,9 +16,16 @@ var nixpackEnvs = map[string]string{
 }
 
 func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath string, framework string) error {
+	logger, _ := utils.GetLoggerInstance()
+	depLog, _ := logger.GetDeploymentLogger(dep.Id)
 
 	imageName := strings.TrimSuffix(path.Base(projectPath), ".git")
 	versionNo := "v1"
+
+	logger.DeployLogger.Printf("Nixpack build start dep=%s image=%s:%s framework=%s", dep.Id, imageName, versionNo, framework)
+	if depLog != nil {
+		depLog.Printf("Nixpack build start image=%s:%s framework=%s", imageName, versionNo, framework)
+	}
 
 	//nixpack build
 	nixargs := []string{
@@ -26,7 +34,10 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 	}
 
 	if pkgs := DetectNativePkgs(projectPath); len(pkgs) > 0 {
-		fmt.Printf("Injecting native build pkgs: %v\n", pkgs)
+		logger.DeployLogger.Printf("Injecting native build pkgs dep=%s pkgs=%v", dep.Id, pkgs)
+		if depLog != nil {
+			depLog.Printf("Injecting native build pkgs: %v", pkgs)
+		}
 		nixargs = append(nixargs, "--pkgs", strings.Join(pkgs, " "))
 	}
 
@@ -41,6 +52,10 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
+		logger.DeployLogger.Printf("Nixpack build failed dep=%s: %v", dep.Id, err)
+		if depLog != nil {
+			depLog.Printf("Nixpack build failed: %v", err)
+		}
 		return fmt.Errorf("could not run command: %w\n", err)
 	}
 
@@ -69,10 +84,17 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
+		logger.DeployLogger.Printf("Docker run failed dep=%s: %v", dep.Id, err)
+		if depLog != nil {
+			depLog.Printf("Docker run failed: %v", err)
+		}
 		return fmt.Errorf("could not run command: %w\n", err)
 	}
 
-	fmt.Print("Container running!\n")
+	logger.DeployLogger.Printf("Container running dep=%s image=%s", dep.Id, imageName)
+	if depLog != nil {
+		depLog.Printf("Container running image=%s", imageName)
+	}
 
 	return nil
 }

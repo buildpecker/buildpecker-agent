@@ -3,15 +3,16 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"sync"
 
 	"github.com/pthsarmah/forge-agent/internal/system"
 	ctypes "github.com/pthsarmah/forge-agent/types"
+	"github.com/pthsarmah/forge-agent/utils"
 )
 
 // TODO: convert 'status' from string to a validated type later
 func SetDeploymentStatus(dep ctypes.Deployment, status string) error {
+	logger, _ := utils.GetLoggerInstance()
 	var data = map[string]any{
 		"id":     dep.Id,
 		"status": status,
@@ -19,12 +20,19 @@ func SetDeploymentStatus(dep ctypes.Deployment, status string) error {
 	_, err := CallHttpAction[any]("/deployments/status", data, true,
 		dep.NodeToken, http.MethodPatch)
 
+	if err != nil {
+		logger.ApiLogger.Printf("Set deployment %s status=%s failed: %v", dep.Id, status, err)
+	} else {
+		logger.ApiLogger.Printf("Deployment %s status=%s", dep.Id, status)
+	}
 	return err
 }
 
 func GetQueuedDeployments() ([]ctypes.Deployment, error) {
+	logger, _ := utils.GetLoggerInstance()
 	nodes, err := system.GetAllNodes()
 	if err != nil {
+		logger.ApiLogger.Printf("Get all nodes failed: %v", err)
 		return nil, fmt.Errorf("get all nodes: %w", err)
 	}
 
@@ -42,7 +50,7 @@ func GetQueuedDeployments() ([]ctypes.Deployment, error) {
 			defer wg.Done()
 			deps, err := fetchDeploymentsForNode(path, info)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "fetch queued for node %s: %v\n", info.NodeId, err)
+				logger.ApiLogger.Printf("Fetch queued for node %s failed: %v", info.NodeId, err)
 				return
 			}
 			mu.Lock()
@@ -52,6 +60,9 @@ func GetQueuedDeployments() ([]ctypes.Deployment, error) {
 	}
 	wg.Wait()
 
+	if len(all) > 0 {
+		logger.ApiLogger.Printf("Fetched %d queued deployments", len(all))
+	}
 	return all, nil
 }
 

@@ -9,21 +9,26 @@ import (
 
 	"github.com/pthsarmah/forge-agent/internal/system"
 	ctypes "github.com/pthsarmah/forge-agent/types"
+	"github.com/pthsarmah/forge-agent/utils"
 )
 
 func SendHeartbeat(ctx context.Context) error {
+	logger, _ := utils.GetLoggerInstance()
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
+
+	logger.ApiLogger.Println("Heartbeat loop started")
 
 	for {
 		select {
 		case <-ctx.Done():
+			logger.ApiLogger.Printf("Heartbeat loop stopped: %v", ctx.Err())
 			return ctx.Err()
 
 		case <-ticker.C:
 			nodes, err := system.GetAllNodes()
 			if err != nil {
-				fmt.Printf("failed to get nodes: %v\n", err)
+				logger.ApiLogger.Printf("Failed to get nodes: %v", err)
 				continue
 			}
 
@@ -44,13 +49,9 @@ func SendHeartbeat(ctx context.Context) error {
 					)
 
 					if err != nil {
-						fmt.Printf(
-							"heartbeat failed for %s: %v\n",
-							id,
-							err,
-						)
+						logger.ApiLogger.Printf("Heartbeat failed for user %s: %v", id, err)
 					} else {
-						fmt.Printf("heartbeat sent for user %s\n at time: %s", id, time.Now())
+						logger.ApiLogger.Printf("Heartbeat sent for user %s at %s", id, time.Now().Format(time.RFC3339))
 					}
 
 				}(userID, node)
@@ -62,10 +63,14 @@ func SendHeartbeat(ctx context.Context) error {
 }
 
 func RegisterNode(token string) error {
+	logger, _ := utils.GetLoggerInstance()
+
 	cpuCores := system.GetCPUCores()
 	memoryMb := system.GetMemorySizeInMB()
 	diskMb := system.GetDiskSizeInMB()
 	hostname := system.GetHostname()
+
+	logger.ApiLogger.Printf("Registering node hostname=%s cpu=%d mem=%dMB disk=%dMB", hostname, cpuCores, memoryMb, diskMb)
 
 	data := ctypes.ConvexRequestBody{
 		Path: "nodes/nodejs/actions:registerNode",
@@ -81,9 +86,11 @@ func RegisterNode(token string) error {
 
 	status, successData, errorData, err := Post("api/action", "application/json", data, nil)
 	if err != nil {
+		logger.ApiLogger.Printf("Registration failed: %v", err)
 		return fmt.Errorf("Registration failed: '%s'\n", err)
 	}
 	if status != 1 {
+		logger.ApiLogger.Printf("Registration failed (status %d): %v", status, errorData)
 		return fmt.Errorf("Registration failed: '%s'\n", errorData)
 	}
 
@@ -93,27 +100,35 @@ func RegisterNode(token string) error {
 
 	flag, err := system.IsNodeAlreadyConnectedToUser(userId)
 	if flag == "connected" {
-		fmt.Print("Node already exists for this user. Deleting new entry...")
+		logger.ApiLogger.Printf("Node already connected for user %s; deleting duplicate", userId)
 		DeleteNode(nodeToken)
 		return fmt.Errorf("Node already connected")
 	}
 
 	if err != nil {
+		logger.ApiLogger.Printf("Node connection check failed: %v", err)
 		return fmt.Errorf("%v", err)
 	}
 
 	err = system.SaveNodeInfo(nodeToken, userId, nodeId)
 
 	if err != nil {
+		logger.ApiLogger.Printf("Save node info failed: %v", err)
 		DeleteNode(nodeToken)
 		return fmt.Errorf("Error in saving node: %v", err)
 	}
 
-	fmt.Println("Node successfully registered!")
+	logger.ApiLogger.Printf("Node registered userId=%s nodeId=%s", userId, nodeId)
 	return nil
 }
 
 func DeleteNode(nodeToken string) error {
+	logger, _ := utils.GetLoggerInstance()
 	_, err := CallHttpAction[any]("/nodes/delete-node", nil, true, nodeToken, http.MethodPost)
+	if err != nil {
+		logger.ApiLogger.Printf("Delete node failed: %v", err)
+	} else {
+		logger.ApiLogger.Println("Node deleted")
+	}
 	return err
 }

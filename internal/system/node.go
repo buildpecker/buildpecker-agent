@@ -8,17 +8,22 @@ import (
 	"path/filepath"
 
 	ctypes "github.com/pthsarmah/forge-agent/types"
+	"github.com/pthsarmah/forge-agent/utils"
 )
 
 func GetAllNodes() (map[string]ctypes.NodeInfo, error) {
+	logger, _ := utils.GetLoggerInstance()
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
+		logger.SystemLogger.Printf("Read home dir failed: %v", err)
 		return nil, fmt.Errorf("Error in reading home director: %v", err)
 	}
 
 	configPath := filepath.Join(homeDir, ".forge/config.json")
 	body, err := os.ReadFile(configPath)
 	if err != nil {
+		logger.SystemLogger.Printf("Read config %s failed: %v", configPath, err)
 		return nil, fmt.Errorf("Error in reading config file: %v", err)
 	}
 
@@ -26,10 +31,12 @@ func GetAllNodes() (map[string]ctypes.NodeInfo, error) {
 
 	err = json.Unmarshal(body, &cfg)
 	if err != nil {
+		logger.SystemLogger.Printf("Unmarshal config failed: %v", err)
 		return nil, fmt.Errorf("Error in reading config file: %v", err)
 	}
 
 	if cfg.Nodes == nil {
+		logger.SystemLogger.Println("Config is empty")
 		err = fmt.Errorf("Config is empty")
 		return nil, fmt.Errorf("Error in reading config file: %v", err)
 	}
@@ -75,13 +82,13 @@ func IsNodeAlreadyConnectedToUser(userId string) (string, error) {
 func SaveNodeInfo(nodeToken string, userId string, nodeId string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-
+		return fmt.Errorf("[SaveNodeInfo] Could not load home directory: %v", err)
 	}
 
 	configDir := filepath.Join(homeDir, ".forge")
 
 	if err := os.MkdirAll(configDir, 0755); err != nil {
-
+		return fmt.Errorf("[SaveNodeInfo] Could not create config directory: %v", err)
 	}
 
 	configPath := filepath.Join(configDir, "config.json")
@@ -94,7 +101,6 @@ func SaveNodeInfo(nodeToken string, userId string, nodeId string) error {
 	stat, err := file.Stat()
 	if err != nil {
 		return fmt.Errorf("Could not stat file '%s'", err)
-
 	}
 
 	var cfg ctypes.Config
@@ -143,7 +149,8 @@ func SaveNodeInfo(nodeToken string, userId string, nodeId string) error {
 		return fmt.Errorf("Error in writing new data '%s'", err)
 	}
 
-	fmt.Println("Updated config!")
+	logger, _ := utils.GetLoggerInstance()
+	logger.SystemLogger.Printf("Saved node info userId=%s nodeId=%s", userId, nodeId)
 
 	return nil
 }
