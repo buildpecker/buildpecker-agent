@@ -42,13 +42,16 @@ func Handler(event string, args ...any) {
 				}
 			}
 
+			var status = "completed"
+
 			//clone repo if not already cloned
-			path, err := git.CloneRepo(dep.Project.RepoUrl)
+			path, err := git.CloneRepo(dep.Project.RepoUrl, dep.Id)
 			if err != nil && path == "" {
 				logger.DeployLogger.Printf("Clone repo failed dep=%s: %v", dep.Id, err)
 				if depLog != nil {
 					depLog.Printf("Clone repo failed: %v", err)
 				}
+				status = "failed"
 			}
 			if depLog != nil {
 				depLog.Printf("Repo cloned at %s", path)
@@ -61,6 +64,7 @@ func Handler(event string, args ...any) {
 				if depLog != nil {
 					depLog.Printf("Detect framework failed: %v", err)
 				}
+				status = "failed"
 			}
 			logger.DeployLogger.Printf("Detected framework dep=%s framework=%s", dep.Id, framework)
 			if depLog != nil {
@@ -74,6 +78,7 @@ func Handler(event string, args ...any) {
 				if depLog != nil {
 					depLog.Printf("Set project framework failed: %v", err)
 				}
+				status = "failed"
 			}
 
 			envs, err := api.GetEnvironmentSecrets(dep)
@@ -82,6 +87,7 @@ func Handler(event string, args ...any) {
 				if depLog != nil {
 					depLog.Printf("Get env secrets failed: %v", err)
 				}
+				status = "failed"
 			}
 			if depLog != nil {
 				depLog.Printf("Fetched %d env secrets", len(envs))
@@ -94,10 +100,11 @@ func Handler(event string, args ...any) {
 				if depLog != nil {
 					depLog.Printf("Nixpack deploy failed: %v", err)
 				}
+				status = "failed"
 			}
 
 			//set deployment status to completed
-			err = api.SetDeploymentStatus(dep, "completed")
+			err = api.SetDeploymentStatus(dep, status)
 			if err != nil {
 				logger.DeployLogger.Printf("Set status completed failed dep=%s: %v", dep.Id, err)
 				if depLog != nil {
@@ -105,9 +112,11 @@ func Handler(event string, args ...any) {
 				}
 			}
 
-			logger.DeployLogger.Printf("Deployment %s done", dep.Id)
-			if depLog != nil {
-				depLog.Println("Deployment done")
+			if status == "completed" {
+				logger.DeployLogger.Printf("Deployment %s done", dep.Id)
+				if depLog != nil {
+					depLog.Println("Deployment done")
+				}
 			}
 
 		default:

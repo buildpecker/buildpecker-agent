@@ -1,7 +1,9 @@
 package deploy
 
 import (
+	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -10,6 +12,31 @@ import (
 	ctypes "github.com/pthsarmah/forge-agent/types"
 	"github.com/pthsarmah/forge-agent/utils"
 )
+
+// runStreaming starts cmd and fans every stdout/stderr line, live, into each
+// non-nil sink. Replaces CombinedOutput so a long build is tailable per
+// deployment instead of dumped once on exit.
+func runStreaming(cmd *exec.Cmd, sinks ...*log.Logger) error {
+	pipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stderr = cmd.Stdout // fold stderr into the same pipe
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	sc := bufio.NewScanner(pipe)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		line := sc.Text()
+		for _, s := range sinks {
+			if s != nil {
+				s.Print(line)
+			}
+		}
+	}
+	return cmd.Wait()
+}
 
 var nixpackEnvs = map[string]string{
 	"NIXPACKS_NODE_VERSION": "22",
@@ -48,15 +75,12 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
+	if err := runStreaming(cmd, logger.DeployLogger, depLog); err != nil {
 		logger.DeployLogger.Printf("Nixpack build failed dep=%s: %v", dep.Id, err)
 		if depLog != nil {
 			depLog.Printf("Nixpack build failed: %v", err)
 		}
-		return fmt.Errorf("could not run command: %w\n", err)
+		return fmt.Errorf("could not run command: %w", err)
 	}
 
 	//build and run
@@ -80,15 +104,12 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 
 	cmd = exec.Command("docker", args...)
 
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
+	if err := runStreaming(cmd, logger.DeployLogger, depLog); err != nil {
 		logger.DeployLogger.Printf("Docker run failed dep=%s: %v", dep.Id, err)
 		if depLog != nil {
 			depLog.Printf("Docker run failed: %v", err)
 		}
-		return fmt.Errorf("could not run command: %w\n", err)
+		return fmt.Errorf("could not run command: %w", err)
 	}
 
 	logger.DeployLogger.Printf("Container running dep=%s image=%s", dep.Id, imageName)
