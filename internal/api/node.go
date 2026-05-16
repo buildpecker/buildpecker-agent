@@ -97,6 +97,8 @@ func RegisterNode(token string) error {
 	nodeToken := fmt.Sprintf("%v", successData.Value["nodeToken"])
 	userId := fmt.Sprintf("%v", successData.Value["userId"])
 	nodeId := fmt.Sprintf("%v", successData.Value["nodeId"])
+	tailscaleAuthKey := fmt.Sprintf("%v", successData.Value["tailscaleAuthKey"])
+	magicDnsSuffix := fmt.Sprintf("%v", successData.Value["magicDnsSuffix"])
 
 	flag, err := system.IsNodeAlreadyConnectedToUser(userId)
 	if flag == "connected" {
@@ -108,6 +110,14 @@ func RegisterNode(token string) error {
 	if err != nil {
 		logger.ApiLogger.Printf("Node connection check failed: %v", err)
 		return fmt.Errorf("%v", err)
+	}
+
+	//tailscale auth setup
+	err = system.SetupTailscaleAuth(tailscaleAuthKey, magicDnsSuffix)
+	if err != nil {
+		logger.SystemLogger.Printf("Setup tailscale auth failed: %v", err)
+		DeleteNode(nodeToken)
+		return fmt.Errorf("Error in saving node: %v", err)
 	}
 
 	err = system.SaveNodeInfo(nodeToken, userId, nodeId)
