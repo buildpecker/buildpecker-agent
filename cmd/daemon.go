@@ -24,12 +24,16 @@ var daemonCmd = &cobra.Command{
 
 		fmt.Println("forge-agent daemon started")
 
-		go metrics.StartCollector(ctx, 5*time.Second)
-		go func() {
-			if err := metrics.Serve(ctx, ":2112"); err != nil {
-				fmt.Fprintf(os.Stderr, "metrics server: %v\n", err)
-			}
-		}()
+		shutdownMetrics, err := metrics.Start(ctx, "", time.Second)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "metrics push init: %v\n", err)
+		} else {
+			defer func() {
+				sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = shutdownMetrics(sctx)
+			}()
+		}
 
 		go func() {
 			if err := api.SendHeartbeat(ctx); err != nil && !errors.Is(err, context.Canceled) {
