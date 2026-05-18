@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"os"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -33,10 +34,23 @@ func Start(ctx context.Context, endpoint string, interval time.Duration) (func(c
 		}
 	}
 
-	exp, err := otlpmetrichttp.New(ctx,
-		otlpmetrichttp.WithEndpoint(endpoint),
-		otlpmetrichttp.WithInsecure(),
-	)
+	// WithEndpoint wants a bare host[:port]; a scheme makes it mangle the
+	// whole string into the host. If the endpoint carries a scheme (e.g.
+	// https://otel-collector.example.com from OTEL_EXPORTER_OTLP_ENDPOINT),
+	// hand it to WithEndpointURL, which parses scheme/host/port/path and sets
+	// TLS from the scheme. Bare host:port (the localhost:4318 default) keeps
+	// the plaintext WithEndpoint + WithInsecure path.
+	var opts []otlpmetrichttp.Option
+	if strings.Contains(endpoint, "://") {
+		opts = append(opts, otlpmetrichttp.WithEndpointURL(endpoint))
+	} else {
+		opts = append(opts,
+			otlpmetrichttp.WithEndpoint(endpoint),
+			otlpmetrichttp.WithInsecure(),
+		)
+	}
+
+	exp, err := otlpmetrichttp.New(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
