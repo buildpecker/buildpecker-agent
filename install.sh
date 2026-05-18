@@ -524,10 +524,18 @@ ensure_alloy() {
   fi
   have docker || { warn "docker missing; skipping Alloy"; return; }
 
-  local home cfg
+  local home cfg log_dir
   home="$(run_user_home)"
   cfg="$home/.forge/grafana/alloy/config.alloy"
   write_alloy_config "$cfg"
+
+  # The agent writes logs to ~/.forge/logs (utils.GetLoggerInstance), but the
+  # Alloy config tails /var/log/forge/*. Bind-mount the real log dir to that
+  # path so Alloy actually sees the files. Created up-front in case the agent
+  # hasn't started yet (empty dir is fine; loki.source.file picks files up).
+  log_dir="$home/.forge/logs"
+  mkdir -p "$log_dir/deployments"
+  chown -R "$RUN_USER": "$log_dir" 2>/dev/null || true
 
   # Network the original `docker run` expects.
   if ! docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1; then
@@ -543,6 +551,7 @@ ensure_alloy() {
   docker run \
     -d \
     -v "$cfg":/etc/alloy/config.alloy \
+    -v "$log_dir":/var/log/forge:ro \
     -p 12345:12345 --name "$ALLOY_CONTAINER" --network "$DOCKER_NETWORK" \
     --restart unless-stopped \
     grafana/alloy:latest \
