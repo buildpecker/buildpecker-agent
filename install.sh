@@ -145,17 +145,37 @@ ensure_cron() {
     pkg_install "$pkg" || { warn "could not install $pkg; supervision will be skipped"; return; }
   fi
 
-  have systemctl || { log "cron present (no systemd; assuming cron is managed elsewhere)"; return; }
+  # Already up via any mechanism (systemd, SysV, container init)? Done.
+  if pgrep -x crond >/dev/null 2>&1 || pgrep -x cron >/dev/null 2>&1; then
+    log "cron daemon already running"
+    return
+  fi
 
-  # Pick whichever unit this distro actually ships.
-  local s
-  for s in "$svc" cron crond cronie; do
-    [[ -z "$s" ]] && continue
-    if systemctl list-unit-files 2>/dev/null | grep -q "^$s\.service"; then
-      systemctl enable --now "$s" >/dev/null 2>&1 \
-        && { log "cron daemon enabled and running ($s)"; return; }
-    fi
-  done
+  if have systemctl; then
+    # A freshly installed unit isn't visible until systemd rescans.
+    systemctl daemon-reload 2>/dev/null || true
+    local s
+    for s in "$svc" cron crond cronie; do
+      [[ -z "$s" ]] && continue
+      systemctl enable --now "$s.service" >/dev/null 2>&1 || true
+      if systemctl is-active --quiet "$s.service" 2>/dev/null; then
+        log "cron daemon enabled and running ($s)"
+        return
+      fi
+    done
+  fi
+
+  # SysV / no-systemd fallback.
+  if have service; then
+    for s in "$svc" cron crond cronie; do
+      [[ -z "$s" ]] && continue
+      service "$s" start >/dev/null 2>&1 && { log "cron daemon started via service ($s)"; return; }
+    done
+  fi
+
+  pgrep -x crond >/dev/null 2>&1 || pgrep -x cron >/dev/null 2>&1 \
+    && { log "cron daemon running"; return; }
+
   warn "cron installed but could not enable its service; enable it manually"
 }
 
