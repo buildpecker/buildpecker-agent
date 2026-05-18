@@ -2,8 +2,9 @@
 #
 # forge-agent uninstaller
 #
-# Removes the forge-agent binary, wrapper, config, systemd service, the
-# passwordless-tailscale sudoers rule, and the Grafana Alloy container/config.
+# Removes the forge-agent binary, wrapper, config, the passwordless-tailscale
+# sudoers rule, and the Grafana Alloy container/config. A running daemon
+# started via `forge-agent daemon &` is left alone — stop it yourself.
 # Prerequisites (docker, nixpacks, tailscale) are intentionally left installed.
 #
 # Usage:
@@ -27,8 +28,6 @@ ASSUME_YES=0
 
 BIN_NAME="forge-agent"
 CONFIG_DIR="/etc/forge-agent"
-SERVICE_NAME="forge-agent.service"
-UNIT_PATH="/etc/systemd/system/$SERVICE_NAME"
 SUDOERS_PATH="/etc/sudoers.d/forge-agent-tailscale"
 ALLOY_CONTAINER="alloy"
 
@@ -36,7 +35,7 @@ log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m==>\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -48,6 +47,8 @@ run_user_home() {
   printf '%s' "$h"
 }
 ALLOY_CONFIG_DIR="$(run_user_home)/.forge/grafana/alloy"
+RUN_USER="${SUDO_USER:-root}"
+CRON_MARKER="# forge-agent daemon (managed by install.sh)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -65,35 +66,20 @@ done
 
 if [[ $ASSUME_YES -ne 1 ]]; then
   echo "This will remove:"
-  echo "  - service : $UNIT_PATH"
   echo "  - binary  : $PREFIX/$BIN_NAME, $PREFIX/$BIN_NAME.bin"
   [[ $KEEP_CONFIG -ne 1 ]] && echo "  - config  : $CONFIG_DIR"
   echo "  - sudoers : $SUDOERS_PATH"
   [[ $KEEP_TAILNET -ne 1 ]] && echo "  - tailnet : log this device out (tailscale logout)"
   [[ $KEEP_ALLOY -ne 1 ]] && echo "  - alloy   : container '$ALLOY_CONTAINER' + $ALLOY_CONFIG_DIR"
+  echo "  - cron    : daemon supervision entries for '$RUN_USER'"
   echo "  (docker, nixpacks, tailscale binaries are left installed)"
+  echo "  NOTE: a daemon started via 'forge-agent daemon &' is NOT stopped;"
+  echo "        kill it yourself (e.g. pkill -f '$BIN_NAME.bin daemon')."
   read -r -p "Proceed? [y/N] " ans
   case "$ans" in
     y|Y|yes|YES) : ;;
     *) log "aborted"; exit 0 ;;
   esac
-fi
-
-# --- Service -----------------------------------------------------------------
-if have systemctl; then
-  if systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE_NAME"; then
-    systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-    systemctl disable "$SERVICE_NAME" 2>/dev/null || true
-    log "service stopped and disabled"
-  fi
-  if [[ -f "$UNIT_PATH" ]]; then
-    rm -f "$UNIT_PATH"
-    systemctl daemon-reload
-    systemctl reset-failed "$SERVICE_NAME" 2>/dev/null || true
-    log "removed unit -> $UNIT_PATH"
-  fi
-else
-  warn "systemd not available; skipping service removal"
 fi
 
 # --- Binary ------------------------------------------------------------------
@@ -111,6 +97,17 @@ done
 if [[ -f "$SUDOERS_PATH" ]]; then
   rm -f "$SUDOERS_PATH"
   log "removed sudoers rule -> $SUDOERS_PATH"
+fi
+
+# --- Reboot crontab ----------------------------------------------------------
+if have crontab; then
+  cur="$(crontab -u "$RUN_USER" -l 2>/dev/null || true)"
+  if printf '%s\n' "$cur" | grep -qF "$CRON_MARKER"; then
+    printf '%s\n' "$cur" | grep -vF "$CRON_MARKER" | sed '/^$/d' \
+      | crontab -u "$RUN_USER" - \
+      && log "removed daemon crontab entries for '$RUN_USER'" \
+      || warn "failed to update crontab for '$RUN_USER'"
+  fi
 fi
 
 # --- Config ------------------------------------------------------------------

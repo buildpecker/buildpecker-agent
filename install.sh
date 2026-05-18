@@ -5,8 +5,7 @@
 # Installs the forge-agent VPS agent and its prerequisites (docker, nixpacks,
 # tailscale; the run user gets passwordless sudo for tailscale), fetches the
 # prebuilt binary from the git repository, installs it onto PATH, seeds
-# configuration, registers a systemd service for the daemon, and spins up a
-# Grafana Alloy container for log shipping.
+# configuration, and spins up a Grafana Alloy container for log shipping.
 #
 # Usage:
 #   sudo ./install.sh [options]
@@ -20,7 +19,6 @@
 #       --convex-site URL CONVEX_SITE_URL value (default: http://localhost:3211)
 #       --otel-endpoint A OTEL_EXPORTER_OTLP_ENDPOINT value (default: localhost:4318)
 #       --loki-url URL    Loki base URL for Alloy (default: https://loki.parthajeet.xyz)
-#       --no-service      Skip systemd service installation
 #       --no-alloy        Skip the Grafana Alloy container
 #   -h, --help            Show this help and exit
 
@@ -36,7 +34,6 @@ CONVEX_CLOUD_URL="https://convex-cloud.parthajeet.xyz"
 CONVEX_SITE_URL="https://convex-site.parthajeet.xyz"
 OTEL_EXPORTER_OTLP_ENDPOINT="https://otel-collector.parthajeet.xyz"
 LOKI_URL="https://loki.parthajeet.xyz"
-INSTALL_SERVICE=1
 INSTALL_ALLOY=1
 
 ALLOY_CONTAINER="alloy"
@@ -44,12 +41,11 @@ DOCKER_NETWORK="forge"
 
 BIN_NAME="forge-agent"
 CONFIG_DIR="/etc/forge-agent"
-SERVICE_NAME="forge-agent.service"
 
 # The human who ran `sudo ./install.sh`. `forge-agent register` writes the
 # node config to that user's ~/.forge/config.json, and the daemon reads it
-# back via os.UserHomeDir(). The service must run as the SAME user or it
-# looks in /root/.forge, finds nothing, and crash-loops in "activating".
+# back via os.UserHomeDir(). Register AND run the daemon as this same user,
+# else it looks in /root/.forge, finds nothing, and fails.
 RUN_USER="${SUDO_USER:-root}"
 
 TMP_DIR=""
@@ -63,7 +59,7 @@ log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m==>\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
 need_root() {
   if [[ $EUID -ne 0 ]]; then
@@ -85,7 +81,6 @@ while [[ $# -gt 0 ]]; do
     --convex-site)      CONVEX_SITE_URL="$2"; shift 2 ;;
     --otel-endpoint)    OTEL_EXPORTER_OTLP_ENDPOINT="$2"; shift 2 ;;
     --loki-url)         LOKI_URL="$2"; shift 2 ;;
-    --no-service)       INSTALL_SERVICE=0; shift ;;
     --no-alloy)         INSTALL_ALLOY=0; shift ;;
     -h|--help)          usage ;;
     *)                  err "unknown option: $1 (see --help)" ;;
@@ -288,45 +283,6 @@ EOF
   # World-readable: the wrapper sources this as the invoking (non-root) user.
   chmod 0644 "$env_file"
   log "wrote config -> $env_file"
-}
-
-# ---------------------------------------------------------------------------
-# systemd service
-# ---------------------------------------------------------------------------
-install_service() {
-  if [[ $INSTALL_SERVICE -ne 1 ]]; then
-    log "skipping systemd service (--no-service)"
-    return
-  fi
-  if ! have systemctl; then
-    warn "systemd not available; skipping service install"
-    return
-  fi
-  local unit="/etc/systemd/system/$SERVICE_NAME"
-  cat > "$unit" <<EOF
-[Unit]
-Description=forge-agent VPS agent (forge.sh)
-After=network-online.target docker.service
-Wants=network-online.target
-Requires=docker.service
-
-[Service]
-Type=simple
-User=$RUN_USER
-EnvironmentFile=$CONFIG_DIR/.env
-ExecStart=$PREFIX/$BIN_NAME daemon
-Restart=on-failure
-RestartSec=5
-WorkingDirectory=$CONFIG_DIR
-
-[Install]
-WantedBy=multi-user.target
-EOF
-  log "wrote unit -> $unit (runs as user: $RUN_USER)"
-  systemctl daemon-reload
-  # Intentionally NOT enabled/started: the daemon must only run after the
-  # node has been registered. Enable + start manually post-registration.
-  log "service installed but not started (register the node first)"
 }
 
 # ---------------------------------------------------------------------------
@@ -562,6 +518,48 @@ ensure_alloy() {
 }
 
 # ---------------------------------------------------------------------------
+# Supervision (no systemd): crontab watchdog + @reboot for the run user
+#
+# Deliberately NOT a systemd service: under a unit the daemon hits HTTPS/TLS
+# errors that never occur from an interactive run. Root cause is the systemd
+# execution context — `EnvironmentFile` mangles the quoted .env URLs and a
+# service has no login env. The watchdog runs the daemon through a LOGIN
+# shell (`bash -lc`), i.e. the exact environment where it works today.
+# ---------------------------------------------------------------------------
+CRON_MARKER="# forge-agent daemon (managed by install.sh)"
+
+install_supervisor_cron() {
+  if ! have crontab; then
+    warn "crontab not found; skipping supervision (start the daemon manually)"
+    return
+  fi
+
+  local home log_file start_cmd reboot_line watch_line existing
+  home="$(run_user_home)"
+  log_file="$home/.forge/daemon.log"
+
+  # Same invocation as a working manual run: login shell so HOME/PATH/env
+  # match, wrapper sources /etc/forge-agent/.env, nohup detaches from cron.
+  start_cmd="nohup \"$PREFIX/$BIN_NAME\" daemon >> \"$log_file\" 2>&1 &"
+  reboot_line="@reboot /bin/bash -lc '$start_cmd'  $CRON_MARKER"
+  # Every minute: relaunch only if no daemon is running (matches the real
+  # process — the wrapper execs \$BIN_NAME.bin).
+  watch_line="* * * * * /bin/bash -lc 'pgrep -f \"$BIN_NAME.bin daemon\" >/dev/null 2>&1 || { $start_cmd }'  $CRON_MARKER"
+
+  existing="$(crontab -u "$RUN_USER" -l 2>/dev/null || true)"
+  if printf '%s\n' "$existing" | grep -qF "$CRON_MARKER"; then
+    # Drop prior forge-agent lines so a changed prefix/path is picked up.
+    existing="$(printf '%s\n' "$existing" | grep -vF "$CRON_MARKER")"
+  fi
+
+  printf '%s\n%s\n%s\n' "$existing" "$reboot_line" "$watch_line" \
+    | sed '/^$/d' \
+    | crontab -u "$RUN_USER" - \
+    && log "supervision installed (@reboot + per-minute watchdog for '$RUN_USER')" \
+    || warn "could not install crontab for '$RUN_USER'"
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
@@ -573,27 +571,31 @@ main() {
   ensure_tailscale
   install_binary
   write_config
-  install_service
   ensure_alloy
+  install_supervisor_cron
+
+  local home; home="$(run_user_home)"
 
   log "done."
   echo
   echo "  binary : $PREFIX/$BIN_NAME"
   echo "  config : $CONFIG_DIR/.env"
   if [[ $INSTALL_ALLOY -eq 1 ]]; then
-    echo "  alloy  : $(run_user_home)/.forge/grafana/alloy/config.alloy (container '$ALLOY_CONTAINER', :12345)"
+    echo "  alloy  : $home/.forge/grafana/alloy/config.alloy (container '$ALLOY_CONTAINER', :12345)"
   fi
   echo
-  echo "  Next steps (in order):"
+  echo "  Next steps (run as user '$RUN_USER' — NOT via sudo; the daemon reads"
+  echo "  its node config from ~/.forge, so it must be the same user):"
   echo "   1. register : $BIN_NAME register <TOKEN>"
-  echo "                 (run as user '$RUN_USER' — NOT via sudo;"
-  echo "                  the service runs as '$RUN_USER' and reads its ~/.forge config)"
-  if [[ $INSTALL_SERVICE -eq 1 ]] && have systemctl; then
-    echo "   2. start    : sudo systemctl enable --now $SERVICE_NAME"
-    echo "   3. logs     : journalctl -u $SERVICE_NAME -f"
-  else
-    echo "   2. start    : $BIN_NAME daemon"
-  fi
+  echo "   2. start    : nohup $BIN_NAME daemon >> $home/.forge/daemon.log 2>&1 &"
+  echo "                 (or just wait <=60s for the watchdog to start it)"
+  echo
+  echo "  Supervision (no systemd) via crontab for '$RUN_USER':"
+  echo "   - @reboot      : starts the daemon on boot"
+  echo "   - per-minute   : relaunches it if not running (crash recovery)"
+  echo "   - logs         : $home/.forge/daemon.log"
+  echo "  Both run through a login shell, matching a working manual run."
+  echo "  Harmless no-op until you register (daemon exits without node config)."
 }
 
 main
