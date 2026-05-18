@@ -547,6 +547,18 @@ ensure_alloy() {
   mkdir -p "$log_dir/deployments"
   chown -R "$RUN_USER": "$log_dir" 2>/dev/null || true
 
+  # Persist Alloy's read-position store so recreating the container resumes
+  # instead of re-reading every file from the start (which resends logs).
+  local data_dir="$home/.forge/grafana/alloy/data"
+  mkdir -p "$data_dir"
+  chown -R "$RUN_USER": "$data_dir" 2>/dev/null || true
+
+  # Pin the container hostname to the real host. The config labels logs with
+  # `constants.hostname`; left unset, Docker assigns a fresh random hostname
+  # per `docker run`, so every recreate becomes a NEW Loki stream and the
+  # resent lines can't be deduplicated (you get N copies after N reinstalls).
+  local host_name; host_name="$(hostname 2>/dev/null || echo forge-node)"
+
   # Network the original `docker run` expects.
   if ! docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1; then
     docker network create "$DOCKER_NETWORK" >/dev/null \
@@ -562,6 +574,8 @@ ensure_alloy() {
     -d \
     -v "$cfg":/etc/alloy/config.alloy \
     -v "$log_dir":/var/log/forge:ro \
+    -v "$data_dir":/var/lib/alloy/data \
+    --hostname "$host_name" \
     -p 12345:12345 --name "$ALLOY_CONTAINER" --network "$DOCKER_NETWORK" \
     --restart unless-stopped \
     grafana/alloy:latest \
