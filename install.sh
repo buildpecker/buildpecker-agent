@@ -584,10 +584,15 @@ install_supervisor_cron() {
   watch_line="* * * * * /bin/bash -lc 'pgrep -f \"[${BIN_NAME:0:1}]${BIN_NAME:1}.bin daemon\" >/dev/null 2>&1 || { $start_cmd }'  $CRON_MARKER"
 
   existing="$(crontab -u "$RUN_USER" -l 2>/dev/null || true)"
-  if printf '%s\n' "$existing" | grep -qF "$CRON_MARKER"; then
-    # Drop prior forge-agent lines so a changed prefix/path is picked up.
-    existing="$(printf '%s\n' "$existing" | grep -vF "$CRON_MARKER")"
-  fi
+  # Drop ALL prior forge-agent cron lines so reinstall never duplicates.
+  # Match two independent tokens: the current marker AND the log-redirect
+  # path that every version we've ever shipped writes (`.forge/daemon.log`).
+  # The marker text changed across builds; the log path never did, so an
+  # old line with a different/missing marker is still stripped here.
+  existing="$(printf '%s\n' "$existing" \
+    | grep -vF "$CRON_MARKER" \
+    | grep -vF '/.forge/daemon.log' \
+    || true)"
 
   printf '%s\n%s\n%s\n' "$existing" "$reboot_line" "$watch_line" \
     | sed '/^$/d' \
