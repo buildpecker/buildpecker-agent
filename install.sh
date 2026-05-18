@@ -195,7 +195,9 @@ write_config() {
   install -d "$CONFIG_DIR"
   local env_file="$CONFIG_DIR/.env"
   if [[ -f "$env_file" ]]; then
-    log "config exists, leaving as-is: $env_file"
+    # Ensure a non-root user can read it (the wrapper sources this file).
+    chmod 0644 "$env_file"
+    log "config exists, leaving contents as-is: $env_file"
     return
   fi
   cat > "$env_file" <<EOF
@@ -205,7 +207,8 @@ CONVEX_SITE_URL="$CONVEX_SITE_URL"
 # OpenTelemetry Exporter
 OTEL_EXPORTER_OTLP_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT"
 EOF
-  chmod 0600 "$env_file"
+  # World-readable: the wrapper sources this as the invoking (non-root) user.
+  chmod 0644 "$env_file"
   log "wrote config -> $env_file"
 }
 
