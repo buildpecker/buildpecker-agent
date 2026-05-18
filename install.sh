@@ -123,6 +123,40 @@ ensure_base_tools() {
       pkg_install "$t" || err "could not install $t; install it manually and re-run"
     fi
   done
+  ensure_cron
+}
+
+# The crontab supervisor is useless if the cron daemon isn't installed/running.
+# Package + service names differ per distro.
+ensure_cron() {
+  local pkg="" svc=""
+  case "$PKG" in
+    apt)            pkg="cron";   svc="cron" ;;
+    dnf|yum)        pkg="cronie"; svc="crond" ;;
+    pacman|zypper)  pkg="cronie"; svc="cronie" ;;
+  esac
+
+  if ! have crontab; then
+    if [[ -z "$pkg" ]]; then
+      warn "crontab missing and no known package manager; install cron manually"
+      return
+    fi
+    log "cron not found; installing ($pkg)"
+    pkg_install "$pkg" || { warn "could not install $pkg; supervision will be skipped"; return; }
+  fi
+
+  have systemctl || { log "cron present (no systemd; assuming cron is managed elsewhere)"; return; }
+
+  # Pick whichever unit this distro actually ships.
+  local s
+  for s in "$svc" cron crond cronie; do
+    [[ -z "$s" ]] && continue
+    if systemctl list-unit-files 2>/dev/null | grep -q "^$s\.service"; then
+      systemctl enable --now "$s" >/dev/null 2>&1 \
+        && { log "cron daemon enabled and running ($s)"; return; }
+    fi
+  done
+  warn "cron installed but could not enable its service; enable it manually"
 }
 
 ensure_docker() {
@@ -543,8 +577,11 @@ install_supervisor_cron() {
   start_cmd="nohup \"$PREFIX/$BIN_NAME\" daemon >> \"$log_file\" 2>&1 &"
   reboot_line="@reboot /bin/bash -lc '$start_cmd'  $CRON_MARKER"
   # Every minute: relaunch only if no daemon is running (matches the real
-  # process — the wrapper execs \$BIN_NAME.bin).
-  watch_line="* * * * * /bin/bash -lc 'pgrep -f \"$BIN_NAME.bin daemon\" >/dev/null 2>&1 || { $start_cmd }'  $CRON_MARKER"
+  # process — the wrapper execs \$BIN_NAME.bin). The leading char is bracketed
+  # ("[f]orge-agent...") so the pgrep pattern in THIS cron line's own cmdline
+  # does not match itself — without it the watchdog always thinks the daemon
+  # is up and never (re)starts it.
+  watch_line="* * * * * /bin/bash -lc 'pgrep -f \"[${BIN_NAME:0:1}]${BIN_NAME:1}.bin daemon\" >/dev/null 2>&1 || { $start_cmd }'  $CRON_MARKER"
 
   existing="$(crontab -u "$RUN_USER" -l 2>/dev/null || true)"
   if printf '%s\n' "$existing" | grep -qF "$CRON_MARKER"; then
