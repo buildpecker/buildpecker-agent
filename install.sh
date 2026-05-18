@@ -2,7 +2,8 @@
 #
 # forge-agent installer
 #
-# Installs the forge-agent VPS agent and its prerequisites (docker, nixpacks),
+# Installs the forge-agent VPS agent and its prerequisites (docker, nixpacks,
+# tailscale; the run user gets passwordless sudo for tailscale),
 # fetches the prebuilt binary from the git repository, installs it onto PATH,
 # seeds configuration, and registers a systemd service for the daemon.
 #
@@ -54,7 +55,7 @@ log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m==>\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
 need_root() {
   if [[ $EUID -ne 0 ]]; then
@@ -145,6 +146,45 @@ ensure_nixpacks() {
   fi
   have nixpacks || err "nixpacks still not on PATH after install"
   log "nixpacks installed: $(nixpacks --version)"
+}
+
+ensure_tailscale() {
+  if have tailscale; then
+    log "tailscale present: $(tailscale version 2>/dev/null | head -1 || echo unknown)"
+  else
+    log "tailscale not found; installing via official script"
+    curl -fsSL https://tailscale.com/install.sh | sh || err "tailscale installation failed"
+    have tailscale || err "tailscale still not on PATH after install"
+    log "tailscale installed: $(tailscale version 2>/dev/null | head -1)"
+  fi
+  grant_tailscale_sudo
+}
+
+# Let the run user drive tailscale without typing a sudo password.
+# `tailscale up` etc. require root; a NOPASSWD sudoers rule scoped to the
+# tailscale binary means `sudo tailscale ...` runs without a prompt.
+grant_tailscale_sudo() {
+  [[ "$RUN_USER" == "root" ]] && { log "run user is root; no sudoers rule needed"; return; }
+
+  local ts_bin
+  ts_bin="$(command -v tailscale || echo /usr/bin/tailscale)"
+
+  local sudoers="/etc/sudoers.d/forge-agent-tailscale"
+  local tmp
+  tmp="$(mktemp)"
+  cat > "$tmp" <<EOF
+# Managed by forge-agent install.sh — passwordless tailscale for the agent user
+$RUN_USER ALL=(root) NOPASSWD: $ts_bin, $ts_bin *
+EOF
+
+  if visudo -cf "$tmp" >/dev/null 2>&1; then
+    install -m 0440 "$tmp" "$sudoers"
+    rm -f "$tmp"
+    log "passwordless sudo for tailscale granted to '$RUN_USER' -> $sudoers"
+  else
+    rm -f "$tmp"
+    err "generated sudoers rule failed validation; not installing it"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -266,6 +306,7 @@ main() {
   ensure_base_tools
   ensure_docker
   ensure_nixpacks
+  ensure_tailscale
   install_binary
   write_config
   install_service
