@@ -13,7 +13,6 @@
 #   -r, --repo URL        Git repo to fetch the binary from
 #                         (default: https://github.com/forge-paas/forge-agent.git)
 #   -b, --branch NAME     Branch to checkout (default: main)
-#   -t, --token TOKEN     Registration token; runs `forge-agent register` after install
 #   -p, --prefix DIR      Install dir for the binary (default: /usr/local/bin)
 #       --convex-url URL  CONVEX_CLOUD_URL value (default: http://localhost:3210)
 #       --convex-site URL CONVEX_SITE_URL value (default: http://localhost:3211)
@@ -28,7 +27,6 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 REPO_URL="https://github.com/forge-paas/forge-agent.git"
 BRANCH="main"
-TOKEN=""
 PREFIX="/usr/local/bin"
 CONVEX_CLOUD_URL="http://localhost:3210"
 CONVEX_SITE_URL="http://localhost:3211"
@@ -46,7 +44,7 @@ log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m==>\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
 need_root() {
   if [[ $EUID -ne 0 ]]; then
@@ -63,7 +61,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -r|--repo)          REPO_URL="$2"; shift 2 ;;
     -b|--branch)        BRANCH="$2"; shift 2 ;;
-    -t|--token)         TOKEN="$2"; shift 2 ;;
     -p|--prefix)        PREFIX="$2"; shift 2 ;;
     --convex-url)       CONVEX_CLOUD_URL="$2"; shift 2 ;;
     --convex-site)      CONVEX_SITE_URL="$2"; shift 2 ;;
@@ -228,19 +225,9 @@ WantedBy=multi-user.target
 EOF
   log "wrote unit -> $unit"
   systemctl daemon-reload
-  systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
-  log "service enabled: $SERVICE_NAME (start with: systemctl start $SERVICE_NAME)"
-}
-
-# ---------------------------------------------------------------------------
-# Registration
-# ---------------------------------------------------------------------------
-register_node() {
-  [[ -z "$TOKEN" ]] && return
-  log "registering node with provided token"
-  ( cd "$CONFIG_DIR" && "$PREFIX/$BIN_NAME" register "$TOKEN" ) \
-    || err "registration failed"
-  log "node registered"
+  # Intentionally NOT enabled/started: the daemon must only run after the
+  # node has been registered. Enable + start manually post-registration.
+  log "service installed but not started (register the node first)"
 }
 
 # ---------------------------------------------------------------------------
@@ -254,20 +241,21 @@ main() {
   ensure_nixpacks
   install_binary
   write_config
-  register_node
   install_service
 
   log "done."
   echo
   echo "  binary : $PREFIX/$BIN_NAME"
   echo "  config : $CONFIG_DIR/.env"
+  echo
+  echo "  Next steps (in order):"
+  echo "   1. register : $BIN_NAME register <TOKEN>"
   if [[ $INSTALL_SERVICE -eq 1 ]] && have systemctl; then
-    echo "  start  : sudo systemctl start $SERVICE_NAME"
-    echo "  logs   : journalctl -u $SERVICE_NAME -f"
+    echo "   2. start    : sudo systemctl enable --now $SERVICE_NAME"
+    echo "   3. logs     : journalctl -u $SERVICE_NAME -f"
   else
-    echo "  run    : $BIN_NAME daemon"
+    echo "   2. start    : $BIN_NAME daemon"
   fi
-  [[ -z "$TOKEN" ]] && echo "  register: $BIN_NAME register <TOKEN>"
 }
 
 main
