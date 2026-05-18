@@ -37,6 +37,10 @@ BIN_NAME="forge-agent"
 CONFIG_DIR="/etc/forge-agent"
 SERVICE_NAME="forge-agent.service"
 
+TMP_DIR=""
+cleanup() { [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]] && rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -144,21 +148,21 @@ install_binary() {
   local src=""
 
   # If invoked from within a checkout that already has the binary, use it.
-  local here
-  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  if [[ -x "$here/$BIN_NAME" ]]; then
+  local self="${BASH_SOURCE[0]:-}"
+  local here=""
+  [[ -n "$self" && -f "$self" ]] && here="$(cd "$(dirname "$self")" && pwd)"
+
+  if [[ -n "$here" && -x "$here/$BIN_NAME" ]]; then
     log "using binary from local checkout: $here/$BIN_NAME"
     src="$here/$BIN_NAME"
   else
-    local tmp
-    tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' EXIT
+    TMP_DIR="$(mktemp -d)"
     log "cloning $REPO_URL (branch $BRANCH)"
-    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$tmp/repo" \
+    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$TMP_DIR/repo" \
       || err "git clone failed"
-    [[ -f "$tmp/repo/$BIN_NAME" ]] \
+    [[ -f "$TMP_DIR/repo/$BIN_NAME" ]] \
       || err "$BIN_NAME not found in repo root; expected a committed prebuilt binary"
-    src="$tmp/repo/$BIN_NAME"
+    src="$TMP_DIR/repo/$BIN_NAME"
   fi
 
   install -d "$PREFIX"
