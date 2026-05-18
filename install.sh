@@ -37,6 +37,12 @@ BIN_NAME="forge-agent"
 CONFIG_DIR="/etc/forge-agent"
 SERVICE_NAME="forge-agent.service"
 
+# The human who ran `sudo ./install.sh`. `forge-agent register` writes the
+# node config to that user's ~/.forge/config.json, and the daemon reads it
+# back via os.UserHomeDir(). The service must run as the SAME user or it
+# looks in /root/.forge, finds nothing, and crash-loops in "activating".
+RUN_USER="${SUDO_USER:-root}"
+
 TMP_DIR=""
 cleanup() { [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]] && rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
@@ -234,6 +240,7 @@ Requires=docker.service
 
 [Service]
 Type=simple
+User=$RUN_USER
 EnvironmentFile=$CONFIG_DIR/.env
 ExecStart=$PREFIX/$BIN_NAME daemon
 Restart=on-failure
@@ -243,7 +250,7 @@ WorkingDirectory=$CONFIG_DIR
 [Install]
 WantedBy=multi-user.target
 EOF
-  log "wrote unit -> $unit"
+  log "wrote unit -> $unit (runs as user: $RUN_USER)"
   systemctl daemon-reload
   # Intentionally NOT enabled/started: the daemon must only run after the
   # node has been registered. Enable + start manually post-registration.
@@ -270,6 +277,8 @@ main() {
   echo
   echo "  Next steps (in order):"
   echo "   1. register : $BIN_NAME register <TOKEN>"
+  echo "                 (run as user '$RUN_USER' — NOT via sudo;"
+  echo "                  the service runs as '$RUN_USER' and reads its ~/.forge config)"
   if [[ $INSTALL_SERVICE -eq 1 ]] && have systemctl; then
     echo "   2. start    : sudo systemctl enable --now $SERVICE_NAME"
     echo "   3. logs     : journalctl -u $SERVICE_NAME -f"
