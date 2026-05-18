@@ -2,9 +2,9 @@
 #
 # forge-agent uninstaller
 #
-# Removes the forge-agent binary, wrapper, config, systemd service, and the
-# passwordless-tailscale sudoers rule. Prerequisites (docker, nixpacks,
-# tailscale) are intentionally left installed.
+# Removes the forge-agent binary, wrapper, config, systemd service, the
+# passwordless-tailscale sudoers rule, and the Grafana Alloy container/config.
+# Prerequisites (docker, nixpacks, tailscale) are intentionally left installed.
 #
 # Usage:
 #   sudo ./uninstall.sh [options]
@@ -13,6 +13,7 @@
 #   -p, --prefix DIR   Dir the binary was installed to (default: /usr/local/bin)
 #       --keep-config  Keep /etc/forge-agent (config) instead of removing it
 #       --keep-tailnet Do not log this device out of the tailnet
+#       --keep-alloy   Keep the Grafana Alloy container and its config
 #   -y, --yes          Do not prompt for confirmation
 #   -h, --help         Show this help and exit
 
@@ -21,6 +22,7 @@ set -euo pipefail
 PREFIX="/usr/local/bin"
 KEEP_CONFIG=0
 KEEP_TAILNET=0
+KEEP_ALLOY=0
 ASSUME_YES=0
 
 BIN_NAME="forge-agent"
@@ -28,20 +30,31 @@ CONFIG_DIR="/etc/forge-agent"
 SERVICE_NAME="forge-agent.service"
 UNIT_PATH="/etc/systemd/system/$SERVICE_NAME"
 SUDOERS_PATH="/etc/sudoers.d/forge-agent-tailscale"
+ALLOY_CONTAINER="alloy"
 
 log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m==>\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+run_user_home() {
+  local u h
+  u="${SUDO_USER:-root}"
+  h="$(getent passwd "$u" 2>/dev/null | cut -d: -f6)"
+  [[ -z "$h" ]] && h="$([[ "$u" == "root" ]] && echo /root || echo "/home/$u")"
+  printf '%s' "$h"
+}
+ALLOY_CONFIG_DIR="$(run_user_home)/.forge/grafana/alloy"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -p|--prefix)    PREFIX="$2"; shift 2 ;;
     --keep-config)  KEEP_CONFIG=1; shift ;;
     --keep-tailnet) KEEP_TAILNET=1; shift ;;
+    --keep-alloy)   KEEP_ALLOY=1; shift ;;
     -y|--yes)       ASSUME_YES=1; shift ;;
     -h|--help)     usage ;;
     *)             err "unknown option: $1 (see --help)" ;;
@@ -57,6 +70,7 @@ if [[ $ASSUME_YES -ne 1 ]]; then
   [[ $KEEP_CONFIG -ne 1 ]] && echo "  - config  : $CONFIG_DIR"
   echo "  - sudoers : $SUDOERS_PATH"
   [[ $KEEP_TAILNET -ne 1 ]] && echo "  - tailnet : log this device out (tailscale logout)"
+  [[ $KEEP_ALLOY -ne 1 ]] && echo "  - alloy   : container '$ALLOY_CONTAINER' + $ALLOY_CONFIG_DIR"
   echo "  (docker, nixpacks, tailscale binaries are left installed)"
   read -r -p "Proceed? [y/N] " ans
   case "$ans" in
@@ -105,6 +119,21 @@ if [[ $KEEP_CONFIG -eq 1 ]]; then
 elif [[ -d "$CONFIG_DIR" ]]; then
   rm -rf "$CONFIG_DIR"
   log "removed config -> $CONFIG_DIR"
+fi
+
+# --- Grafana Alloy -----------------------------------------------------------
+if [[ $KEEP_ALLOY -eq 1 ]]; then
+  log "keeping Grafana Alloy (--keep-alloy)"
+else
+  if have docker && docker ps -a --format '{{.Names}}' | grep -qx "$ALLOY_CONTAINER"; then
+    docker rm -f "$ALLOY_CONTAINER" >/dev/null 2>&1 \
+      && log "removed alloy container -> $ALLOY_CONTAINER" \
+      || warn "failed to remove alloy container"
+  fi
+  if [[ -d "$ALLOY_CONFIG_DIR" ]]; then
+    rm -rf "$ALLOY_CONFIG_DIR"
+    log "removed alloy config -> $ALLOY_CONFIG_DIR"
+  fi
 fi
 
 # --- Tailnet -----------------------------------------------------------------

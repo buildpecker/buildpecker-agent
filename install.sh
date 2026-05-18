@@ -3,9 +3,10 @@
 # forge-agent installer
 #
 # Installs the forge-agent VPS agent and its prerequisites (docker, nixpacks,
-# tailscale; the run user gets passwordless sudo for tailscale),
-# fetches the prebuilt binary from the git repository, installs it onto PATH,
-# seeds configuration, and registers a systemd service for the daemon.
+# tailscale; the run user gets passwordless sudo for tailscale), fetches the
+# prebuilt binary from the git repository, installs it onto PATH, seeds
+# configuration, registers a systemd service for the daemon, and spins up a
+# Grafana Alloy container for log shipping.
 #
 # Usage:
 #   sudo ./install.sh [options]
@@ -18,7 +19,9 @@
 #       --convex-url URL  CONVEX_CLOUD_URL value (default: http://localhost:3210)
 #       --convex-site URL CONVEX_SITE_URL value (default: http://localhost:3211)
 #       --otel-endpoint A OTEL_EXPORTER_OTLP_ENDPOINT value (default: localhost:4318)
+#       --loki-url URL    Loki base URL for Alloy (default: https://loki.parthajeet.xyz)
 #       --no-service      Skip systemd service installation
+#       --no-alloy        Skip the Grafana Alloy container
 #   -h, --help            Show this help and exit
 
 set -euo pipefail
@@ -32,7 +35,12 @@ PREFIX="/usr/local/bin"
 CONVEX_CLOUD_URL="https://convex-cloud.parthajeet.xyz"
 CONVEX_SITE_URL="https://convex-site.parthajeet.xyz"
 OTEL_EXPORTER_OTLP_ENDPOINT="https://otel-collector.parthajeet.xyz"
+LOKI_URL="https://loki.parthajeet.xyz"
 INSTALL_SERVICE=1
+INSTALL_ALLOY=1
+
+ALLOY_CONTAINER="alloy"
+DOCKER_NETWORK="forge"
 
 BIN_NAME="forge-agent"
 CONFIG_DIR="/etc/forge-agent"
@@ -55,7 +63,7 @@ log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m==>\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
 need_root() {
   if [[ $EUID -ne 0 ]]; then
@@ -76,7 +84,9 @@ while [[ $# -gt 0 ]]; do
     --convex-url)       CONVEX_CLOUD_URL="$2"; shift 2 ;;
     --convex-site)      CONVEX_SITE_URL="$2"; shift 2 ;;
     --otel-endpoint)    OTEL_EXPORTER_OTLP_ENDPOINT="$2"; shift 2 ;;
+    --loki-url)         LOKI_URL="$2"; shift 2 ;;
     --no-service)       INSTALL_SERVICE=0; shift ;;
+    --no-alloy)         INSTALL_ALLOY=0; shift ;;
     -h|--help)          usage ;;
     *)                  err "unknown option: $1 (see --help)" ;;
   esac
@@ -320,6 +330,229 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Grafana Alloy (log shipping)
+# ---------------------------------------------------------------------------
+run_user_home() {
+  local h
+  h="$(getent passwd "$RUN_USER" 2>/dev/null | cut -d: -f6)"
+  [[ -z "$h" ]] && h="$([[ "$RUN_USER" == "root" ]] && echo /root || echo "/home/$RUN_USER")"
+  printf '%s' "$h"
+}
+
+write_alloy_config() {
+  local cfg="$1"
+  local dir
+  dir="$(dirname "$cfg")"
+  # Create the full path recursively (mkdir -p semantics) so a fresh host with
+  # no ~/.forge tree doesn't error on the `cat >` / docker bind-mount.
+  mkdir -p "$dir" || err "could not create alloy config dir: $dir"
+  [[ -d "$dir" ]] || err "alloy config dir missing after create: $dir"
+  # Quoted heredoc: the config contains backticks/`${}`/`sys.env(...)` that must
+  # be written literally. The Loki push URL is templated via a placeholder and
+  # substituted afterwards so --loki-url stays configurable.
+  cat > "$cfg" <<'ALLOY_EOF'
+// ~/.forge/grafana/alloy/config.alloy
+// Run: alloy run ~/.forge/grafana/alloy/config.alloy --storage.path=/tmp/alloy
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+/* ---------- file discovery ---------- */
+
+local.file_match "forge_api" {
+  path_targets = [{
+    __path__ = "/var/log/forge/api.log",
+    job      = "forge-agent",
+    service  = "api",
+    host     = constants.hostname,
+  }]
+}
+
+local.file_match "forge_system" {
+  path_targets = [{
+    __path__ = "/var/log/forge/system.log",
+    job      = "forge-agent",
+    service  = "system",
+    host     = constants.hostname,
+  }]
+}
+
+local.file_match "forge_deploy" {
+  path_targets = [{
+    __path__ = "/var/log/forge/deploy.log",
+    job      = "forge-agent",
+    service  = "deploy",
+    host     = constants.hostname,
+  }]
+}
+
+local.file_match "forge_deployments" {
+  path_targets = [{
+    __path__ = "/var/log/forge/deployments/*.log",
+    job      = "forge-agent",
+    service  = "deployment",
+    host     = constants.hostname,
+  }]
+}
+
+/* ---------- tail ---------- */
+
+loki.source.file "forge_api" {
+  targets    = local.file_match.forge_api.targets
+  forward_to = [loki.process.forge_std.receiver]
+}
+
+loki.source.file "forge_system" {
+  targets    = local.file_match.forge_system.targets
+  forward_to = [loki.process.forge_std.receiver]
+}
+
+loki.source.file "forge_deploy" {
+  targets    = local.file_match.forge_deploy.targets
+  forward_to = [loki.process.forge_std.receiver]
+}
+
+loki.source.file "forge_deployments" {
+  targets    = local.file_match.forge_deployments.targets
+  forward_to = [loki.process.forge_deployment.receiver]
+}
+
+/* ---------- parse: api / system / deploy ----------
+   line shape: "[API] 2026/05/14 12:34:56.123456 message..." (UTC)
+*/
+loki.process "forge_std" {
+  forward_to = [loki.write.default.receiver]
+
+  stage.regex {
+    expression = `^\[(?P<tag>[A-Z]+)\]\s+(?P<ts>\d{4}/\d{2}/\d{2}\s\d{2}:\d{2}:\d{2}\.\d+)\s+(?P<msg>.*)$`
+  }
+
+  stage.timestamp {
+    source   = "ts"
+    format   = "2006/01/02 15:04:05.000000"
+    location = "UTC"
+  }
+
+  // tag becomes a label (low cardinality: API/SYSTEM/DEPLOY)
+  stage.labels {
+    values = { tag = "" }
+  }
+
+  // drop the prefix from the stored line
+  stage.output {
+    source = "msg"
+  }
+
+  // crude level inference for Loki/Grafana level filter
+  stage.match {
+    selector = `{tag=~".+"} |~ "(?i)failed|error"`
+    stage.static_labels {
+      values = { level = "error" }
+    }
+  }
+  stage.match {
+    selector = `{tag=~".+"} |~ "(?i)warn"`
+    stage.static_labels {
+      values = { level = "warn" }
+    }
+  }
+}
+
+/* ---------- parse: per-deployment ----------
+   line shape: "[DEPLOYMENT:<id>] 2026/05/14 12:34:56.123456 message..."
+   NB: deployment_id is high cardinality — kept in structured_metadata,
+   not as a label, to avoid blowing up the index.
+*/
+loki.process "forge_deployment" {
+  forward_to = [loki.write.default.receiver]
+
+  stage.regex {
+    expression = `^\[DEPLOYMENT:(?P<deployment_id>[^\]]+)\]\s+(?P<ts>\d{4}/\d{2}/\d{2}\s\d{2}:\d{2}:\d{2}\.\d+)\s+(?P<msg>.*)$`
+  }
+
+  stage.timestamp {
+    source   = "ts"
+    format   = "2006/01/02 15:04:05.000000"
+    location = "UTC"
+  }
+
+  stage.structured_metadata {
+    values = { deployment_id = "" }
+  }
+
+  stage.static_labels {
+    values = { tag = "DEPLOYMENT" }
+  }
+
+  stage.output {
+    source = "msg"
+  }
+}
+
+/* ---------- ship ---------- */
+
+loki.write "default" {
+  endpoint {
+    url = "__LOKI_PUSH_URL__"
+
+    // Grafana Cloud: uncomment + set env vars
+    // tenant_id = sys.env("LOKI_TENANT_ID")
+    // basic_auth {
+    //   username = sys.env("LOKI_USER")
+    //   password = sys.env("LOKI_PASSWORD")
+    // }
+  }
+
+  external_labels = {
+    env = "dev",
+  }
+}
+ALLOY_EOF
+
+  local push_url="${LOKI_URL%/}/loki/api/v1/push"
+  sed -i "s|__LOKI_PUSH_URL__|$push_url|" "$cfg"
+  chown -R "$RUN_USER": "$(dirname "$(dirname "$(dirname "$cfg")")")" 2>/dev/null || true
+  log "wrote alloy config -> $cfg (loki: $push_url)"
+}
+
+ensure_alloy() {
+  if [[ $INSTALL_ALLOY -ne 1 ]]; then
+    log "skipping Grafana Alloy (--no-alloy)"
+    return
+  fi
+  have docker || { warn "docker missing; skipping Alloy"; return; }
+
+  local home cfg
+  home="$(run_user_home)"
+  cfg="$home/.forge/grafana/alloy/config.alloy"
+  write_alloy_config "$cfg"
+
+  # Network the original `docker run` expects.
+  if ! docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1; then
+    docker network create "$DOCKER_NETWORK" >/dev/null \
+      && log "created docker network: $DOCKER_NETWORK"
+  fi
+
+  # Recreate the container so it picks up the (possibly new) config.
+  if docker ps -a --format '{{.Names}}' | grep -qx "$ALLOY_CONTAINER"; then
+    docker rm -f "$ALLOY_CONTAINER" >/dev/null 2>&1 || true
+  fi
+
+  docker run \
+    -d \
+    -v "$cfg":/etc/alloy/config.alloy \
+    -p 12345:12345 --name "$ALLOY_CONTAINER" --network "$DOCKER_NETWORK" \
+    --restart unless-stopped \
+    grafana/alloy:latest \
+      run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data \
+      /etc/alloy/config.alloy >/dev/null \
+    && log "alloy container started (http://localhost:12345)" \
+    || warn "failed to start alloy container"
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
@@ -332,11 +565,15 @@ main() {
   install_binary
   write_config
   install_service
+  ensure_alloy
 
   log "done."
   echo
   echo "  binary : $PREFIX/$BIN_NAME"
   echo "  config : $CONFIG_DIR/.env"
+  if [[ $INSTALL_ALLOY -eq 1 ]]; then
+    echo "  alloy  : $(run_user_home)/.forge/grafana/alloy/config.alloy (container '$ALLOY_CONTAINER', :12345)"
+  fi
   echo
   echo "  Next steps (in order):"
   echo "   1. register : $BIN_NAME register <TOKEN>"
