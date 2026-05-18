@@ -158,6 +158,28 @@ ensure_tailscale() {
     log "tailscale installed: $(tailscale version 2>/dev/null | head -1)"
   fi
   grant_tailscale_sudo
+  set_tailscale_operator
+}
+
+# Drop the need to type `sudo` at all: setting the tailscale operator to the
+# run user lets that user run `tailscale up` / `tailscale set` directly.
+# Requires tailscaled to be running; the official installer enables it.
+set_tailscale_operator() {
+  [[ "$RUN_USER" == "root" ]] && return
+
+  # tailscaled may need a moment after install to come up.
+  local i
+  for i in 1 2 3 4 5; do
+    tailscale version >/dev/null 2>&1 && break
+    sleep 1
+  done
+
+  if tailscale set --operator="$RUN_USER" 2>/dev/null; then
+    log "tailscale operator set to '$RUN_USER' (no sudo needed for tailscale)"
+  else
+    warn "could not set tailscale operator now (daemon not ready / not logged in)"
+    warn "run once after first 'tailscale up': sudo tailscale set --operator=$RUN_USER"
+  fi
 }
 
 # Let the run user drive tailscale without typing a sudo password.
