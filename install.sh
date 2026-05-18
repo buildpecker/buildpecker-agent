@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+#
+# forge-agent installer
+#
+# Installs the forge-agent VPS agent and its prerequisites (docker, nixpacks),
+# fetches the prebuilt binary from the git repository, installs it onto PATH,
+# seeds configuration, and registers a systemd service for the daemon.
+#
+# Usage:
+#   sudo ./install.sh [options]
+#
+# Options:
+#   -r, --repo URL        Git repo to fetch the binary from
+#                         (default: https://github.com/forge-paas/forge-agent.git)
+#   -b, --branch NAME     Branch to checkout (default: main)
+#   -t, --token TOKEN     Registration token; runs `forge-agent register` after install
+#   -p, --prefix DIR      Install dir for the binary (default: /usr/local/bin)
+#       --convex-url URL  CONVEX_CLOUD_URL value (default: http://localhost:3210)
+#       --convex-site URL CONVEX_SITE_URL value (default: http://localhost:3211)
+#       --otel-endpoint A OTEL_EXPORTER_OTLP_ENDPOINT value (default: localhost:4318)
+#       --no-service      Skip systemd service installation
+#   -h, --help            Show this help and exit
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Defaults
+# ---------------------------------------------------------------------------
+REPO_URL="https://github.com/forge-paas/forge-agent.git"
+BRANCH="main"
+TOKEN=""
+PREFIX="/usr/local/bin"
+CONVEX_CLOUD_URL="http://localhost:3210"
+CONVEX_SITE_URL="http://localhost:3211"
+OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4318"
+INSTALL_SERVICE=1
+
+BIN_NAME="forge-agent"
+CONFIG_DIR="/etc/forge-agent"
+SERVICE_NAME="forge-agent.service"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m==>\033[0m %s\n' "$*" >&2; }
+err()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+
+usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+
+need_root() {
+  if [[ $EUID -ne 0 ]]; then
+    err "must run as root (use sudo)"
+  fi
+}
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# ---------------------------------------------------------------------------
+# Arg parsing
+# ---------------------------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -r|--repo)          REPO_URL="$2"; shift 2 ;;
+    -b|--branch)        BRANCH="$2"; shift 2 ;;
+    -t|--token)         TOKEN="$2"; shift 2 ;;
+    -p|--prefix)        PREFIX="$2"; shift 2 ;;
+    --convex-url)       CONVEX_CLOUD_URL="$2"; shift 2 ;;
+    --convex-site)      CONVEX_SITE_URL="$2"; shift 2 ;;
+    --otel-endpoint)    OTEL_EXPORTER_OTLP_ENDPOINT="$2"; shift 2 ;;
+    --no-service)       INSTALL_SERVICE=0; shift ;;
+    -h|--help)          usage ;;
+    *)                  err "unknown option: $1 (see --help)" ;;
+  esac
+done
+
+# ---------------------------------------------------------------------------
+# OS / package manager detection
+# ---------------------------------------------------------------------------
+PKG=""
+detect_pkg() {
+  if   have apt-get; then PKG="apt"
+  elif have dnf;     then PKG="dnf"
+  elif have yum;     then PKG="yum"
+  elif have pacman;  then PKG="pacman"
+  elif have zypper;  then PKG="zypper"
+  else warn "no supported package manager found; prerequisite auto-install disabled"
+  fi
+}
+
+pkg_install() {
+  # $@ = package names
+  case "$PKG" in
+    apt)    apt-get update -qq && apt-get install -y "$@" ;;
+    dnf)    dnf install -y "$@" ;;
+    yum)    yum install -y "$@" ;;
+    pacman) pacman -Sy --noconfirm "$@" ;;
+    zypper) zypper install -y "$@" ;;
+    *)      return 1 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Prerequisites
+# ---------------------------------------------------------------------------
+ensure_base_tools() {
+  for t in curl git; do
+    if ! have "$t"; then
+      log "installing missing tool: $t"
+      pkg_install "$t" || err "could not install $t; install it manually and re-run"
+    fi
+  done
+}
+
+ensure_docker() {
+  if have docker; then
+    log "docker present: $(docker --version 2>/dev/null || echo unknown)"
+    return
+  fi
+  log "docker not found; installing via get.docker.com"
+  if ! have curl; then pkg_install curl || err "curl required to install docker"; fi
+  curl -fsSL https://get.docker.com | sh || err "docker installation failed"
+  systemctl enable --now docker 2>/dev/null || warn "could not enable docker service (no systemd?)"
+  have docker || err "docker still not on PATH after install"
+  log "docker installed: $(docker --version)"
+}
+
+ensure_nixpacks() {
+  if have nixpacks; then
+    log "nixpacks present: $(nixpacks --version 2>/dev/null || echo unknown)"
+    return
+  fi
+  log "nixpacks not found; installing via official script"
+  # Installs to /usr/local/bin by default.
+  curl -fsSL https://nixpacks.com/install.sh | bash || err "nixpacks installation failed"
+  if ! have nixpacks && [[ -x /usr/local/bin/nixpacks ]]; then
+    : # on PATH via /usr/local/bin
+  fi
+  have nixpacks || err "nixpacks still not on PATH after install"
+  log "nixpacks installed: $(nixpacks --version)"
+}
+
+# ---------------------------------------------------------------------------
+# Binary fetch + install
+# ---------------------------------------------------------------------------
+install_binary() {
+  local src=""
+
+  # If invoked from within a checkout that already has the binary, use it.
+  local here
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -x "$here/$BIN_NAME" ]]; then
+    log "using binary from local checkout: $here/$BIN_NAME"
+    src="$here/$BIN_NAME"
+  else
+    local tmp
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    log "cloning $REPO_URL (branch $BRANCH)"
+    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$tmp/repo" \
+      || err "git clone failed"
+    [[ -f "$tmp/repo/$BIN_NAME" ]] \
+      || err "$BIN_NAME not found in repo root; expected a committed prebuilt binary"
+    src="$tmp/repo/$BIN_NAME"
+  fi
+
+  install -d "$PREFIX"
+  install -m 0755 "$src" "$PREFIX/$BIN_NAME"
+  log "installed binary -> $PREFIX/$BIN_NAME"
+
+  case ":$PATH:" in
+    *":$PREFIX:"*) : ;;
+    *) warn "$PREFIX is not on PATH; add it or move the binary into a PATH dir" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+write_config() {
+  install -d "$CONFIG_DIR"
+  local env_file="$CONFIG_DIR/.env"
+  if [[ -f "$env_file" ]]; then
+    log "config exists, leaving as-is: $env_file"
+    return
+  fi
+  cat > "$env_file" <<EOF
+CONVEX_CLOUD_URL="$CONVEX_CLOUD_URL"
+CONVEX_SITE_URL="$CONVEX_SITE_URL"
+
+# OpenTelemetry Exporter
+OTEL_EXPORTER_OTLP_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT"
+EOF
+  chmod 0600 "$env_file"
+  log "wrote config -> $env_file"
+}
+
+# ---------------------------------------------------------------------------
+# systemd service
+# ---------------------------------------------------------------------------
+install_service() {
+  if [[ $INSTALL_SERVICE -ne 1 ]]; then
+    log "skipping systemd service (--no-service)"
+    return
+  fi
+  if ! have systemctl; then
+    warn "systemd not available; skipping service install"
+    return
+  fi
+  local unit="/etc/systemd/system/$SERVICE_NAME"
+  cat > "$unit" <<EOF
+[Unit]
+Description=forge-agent VPS agent (forge.sh)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+EnvironmentFile=$CONFIG_DIR/.env
+ExecStart=$PREFIX/$BIN_NAME daemon
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=$CONFIG_DIR
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  log "wrote unit -> $unit"
+  systemctl daemon-reload
+  systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
+  log "service enabled: $SERVICE_NAME (start with: systemctl start $SERVICE_NAME)"
+}
+
+# ---------------------------------------------------------------------------
+# Registration
+# ---------------------------------------------------------------------------
+register_node() {
+  [[ -z "$TOKEN" ]] && return
+  log "registering node with provided token"
+  ( cd "$CONFIG_DIR" && "$PREFIX/$BIN_NAME" register "$TOKEN" ) \
+    || err "registration failed"
+  log "node registered"
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+main() {
+  need_root
+  detect_pkg
+  ensure_base_tools
+  ensure_docker
+  ensure_nixpacks
+  install_binary
+  write_config
+  register_node
+  install_service
+
+  log "done."
+  echo
+  echo "  binary : $PREFIX/$BIN_NAME"
+  echo "  config : $CONFIG_DIR/.env"
+  if [[ $INSTALL_SERVICE -eq 1 ]] && have systemctl; then
+    echo "  start  : sudo systemctl start $SERVICE_NAME"
+    echo "  logs   : journalctl -u $SERVICE_NAME -f"
+  else
+    echo "  run    : $BIN_NAME daemon"
+  fi
+  [[ -z "$TOKEN" ]] && echo "  register: $BIN_NAME register <TOKEN>"
+}
+
+main
