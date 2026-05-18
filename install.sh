@@ -28,9 +28,9 @@ set -euo pipefail
 REPO_URL="https://github.com/forge-paas/forge-agent.git"
 BRANCH="main"
 PREFIX="/usr/local/bin"
-CONVEX_CLOUD_URL="http://localhost:3210"
-CONVEX_SITE_URL="http://localhost:3211"
-OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4318"
+CONVEX_CLOUD_URL="https://convex-cloud.parthajeet.xyz"
+CONVEX_SITE_URL="https://convex-site.parthajeet.xyz"
+OTEL_EXPORTER_OTLP_ENDPOINT="https://otel-collector.parthajeet.xyz"
 INSTALL_SERVICE=1
 
 BIN_NAME="forge-agent"
