@@ -166,8 +166,21 @@ install_binary() {
   fi
 
   install -d "$PREFIX"
-  install -m 0755 "$src" "$PREFIX/$BIN_NAME"
-  log "installed binary -> $PREFIX/$BIN_NAME"
+  install -m 0755 "$src" "$PREFIX/$BIN_NAME.bin"
+
+  # Wrapper: the binary loads .env from the current working directory, so a
+  # bare `forge-agent register ...` run from $HOME sees no config. The wrapper
+  # sources the global config into the environment before exec'ing the real
+  # binary, making it work from any cwd.
+  cat > "$PREFIX/$BIN_NAME" <<EOF
+#!/usr/bin/env bash
+set -a
+[ -f "$CONFIG_DIR/.env" ] && . "$CONFIG_DIR/.env"
+set +a
+exec "$PREFIX/$BIN_NAME.bin" "\$@"
+EOF
+  chmod 0755 "$PREFIX/$BIN_NAME"
+  log "installed binary -> $PREFIX/$BIN_NAME (wrapper) + $PREFIX/$BIN_NAME.bin"
 
   case ":$PATH:" in
     *":$PREFIX:"*) : ;;
