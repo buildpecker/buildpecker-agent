@@ -60,9 +60,15 @@ func Post(
 		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("read response body: %w", err)
 	}
 
+	if res.StatusCode >= 400 {
+		return 0, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{},
+			fmt.Errorf("convex http %d for %s: %s", res.StatusCode, path, strings.TrimSpace(string(raw)))
+	}
+
 	var env ctypes.APIEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{}, fmt.Errorf("decode response envelope: %w", err)
+		return -1, ctypes.APISuccessResponse{}, ctypes.APIErrorResponse{},
+			fmt.Errorf("decode response envelope (http %d, body: %s): %w", res.StatusCode, strings.TrimSpace(string(raw)), err)
 	}
 
 	switch env.Status {
