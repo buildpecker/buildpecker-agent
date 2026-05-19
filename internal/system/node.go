@@ -67,11 +67,6 @@ func SetupCloudflared(tunnelToken string) error {
 		return fmt.Errorf("cloudflared binary not on PATH (install.sh installs it): %v", err)
 	}
 
-	if out, err := exec.Command("pgrep", "-f", "cloudflared tunnel.*run").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
-		logger.SystemLogger.Println("cloudflared tunnel already running")
-		return nil
-	}
-
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("could not resolve home directory: %v", err)
@@ -83,11 +78,27 @@ func SetupCloudflared(tunnelToken string) error {
 	}
 
 	tokenPath := filepath.Join(forgeDir, "cloudflared.token")
+	prev, _ := os.ReadFile(tokenPath)
+	running := false
+	if out, err := exec.Command("pgrep", "-f", "cloudflared tunnel.*run").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
+		running = true
+	}
+
+	if running && strings.TrimSpace(string(prev)) == strings.TrimSpace(tunnelToken) {
+		logger.SystemLogger.Println("cloudflared tunnel already running with current token")
+		return nil
+	}
+
 	if err := os.WriteFile(tokenPath, []byte(tunnelToken), 0600); err != nil {
 		return fmt.Errorf("could not persist cloudflared token: %v", err)
 	}
 	if err := os.Chmod(tokenPath, 0600); err != nil {
 		return fmt.Errorf("could not secure cloudflared token: %v", err)
+	}
+
+	if running {
+		_ = exec.Command("pkill", "-f", "cloudflared tunnel.*run").Run()
+		logger.SystemLogger.Println("stopped stale cloudflared (tunnel token changed)")
 	}
 
 	logFile, err := os.OpenFile(filepath.Join(forgeDir, "cloudflared.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
