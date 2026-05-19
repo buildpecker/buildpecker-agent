@@ -85,6 +85,17 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 
 	sanitizedId := strings.ReplaceAll(dep.Id, "_", "-") // routers must be DNS-safe
 
+	rmCmd := exec.Command("docker", "rm", "-f", imageName)
+	if out, err := rmCmd.CombinedOutput(); err != nil {
+		logger.DeployLogger.Printf("No previous container to remove dep=%s name=%s: %s",
+			dep.Id, imageName, strings.TrimSpace(string(out)))
+	} else {
+		logger.DeployLogger.Printf("Removed previous container dep=%s name=%s", dep.Id, imageName)
+		if depLog != nil {
+			depLog.Printf("Removed previous container name=%s", imageName)
+		}
+	}
+
 	args := []string{
 		"run",
 		"-d",

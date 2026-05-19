@@ -667,6 +667,17 @@ ensure_traefik() {
 # ---------------------------------------------------------------------------
 CRON_MARKER="# forge-agent daemon (managed by install.sh)"
 
+# A daemon started by a previous install keeps running the OLD binary even
+# after the file is replaced (Linux holds the deleted inode). The per-minute
+# watchdog only launches when NO daemon is running, so it never supersedes a
+# live old process. Kill it here so the watchdog relaunches the fresh binary.
+stop_running_daemon() {
+  if pgrep -f "$BIN_NAME.bin daemon" >/dev/null 2>&1; then
+    pkill -f "$BIN_NAME.bin daemon" 2>/dev/null || true
+    log "stopped running daemon (old binary); watchdog will relaunch the new one"
+  fi
+}
+
 install_supervisor_cron() {
   if ! have crontab; then
     warn "crontab not found; skipping supervision (start the daemon manually)"
@@ -721,6 +732,7 @@ main() {
   write_config
   ensure_alloy
   ensure_traefik
+  stop_running_daemon
   install_supervisor_cron
 
   local home; home="$(run_user_home)"
