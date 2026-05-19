@@ -2,11 +2,11 @@
 #
 # forge-agent uninstaller
 #
-# Removes the forge-agent binary, wrapper, config, the passwordless-tailscale
-# sudoers rule, the Grafana Alloy container/config, and the cloudflared binary
-# + tunnel token (the running tunnel IS stopped — it exposes the node). A
-# running daemon started via `forge-agent daemon &` is left alone — stop it
-# yourself. Prerequisites (docker, nixpacks, tailscale) are left installed.
+# Stops the running forge-agent daemon and removes the binary, wrapper, config,
+# the passwordless-tailscale sudoers rule, the Grafana Alloy container/config,
+# and the cloudflared binary + tunnel token (the running tunnel IS stopped — it
+# exposes the node). Prerequisites (docker, nixpacks, tailscale) are left
+# installed.
 #
 # Usage:
 #   sudo ./uninstall.sh [options]
@@ -77,6 +77,7 @@ done
 
 if [[ $ASSUME_YES -ne 1 ]]; then
   echo "This will remove:"
+  echo "  - daemon  : running '$BIN_NAME daemon' is stopped"
   echo "  - binary  : $PREFIX/$BIN_NAME, $PREFIX/$BIN_NAME.bin"
   [[ $KEEP_CONFIG -ne 1 ]] && echo "  - config  : $CONFIG_DIR"
   echo "  - sudoers : $SUDOERS_PATH"
@@ -86,8 +87,6 @@ if [[ $ASSUME_YES -ne 1 ]]; then
   [[ $KEEP_CLOUDFLARED -ne 1 ]] && echo "  - cflared : $PREFIX/cloudflared + token; running tunnel STOPPED"
   echo "  - cron    : daemon supervision entries for '$RUN_USER'"
   echo "  (docker, nixpacks, tailscale binaries are left installed)"
-  echo "  NOTE: a daemon started via 'forge-agent daemon &' is NOT stopped;"
-  echo "        kill it yourself (e.g. pkill -f '$BIN_NAME.bin daemon')."
   read -r -p "Proceed? [y/N] " ans
   case "$ans" in
     y|Y|yes|YES) : ;;
@@ -121,6 +120,19 @@ if have crontab; then
       && log "removed daemon crontab entries for '$RUN_USER'" \
       || warn "failed to update crontab for '$RUN_USER'"
   fi
+fi
+
+# --- Daemon ------------------------------------------------------------------
+# Done after supervision (cron) is removed so the per-minute watchdog can't
+# relaunch it in the gap; the binary is already gone so a stray relaunch would
+# no-op anyway. Frees the deleted-inode the live process still holds.
+if pgrep -f "$BIN_NAME.bin daemon" >/dev/null 2>&1; then
+  pkill -f "$BIN_NAME.bin daemon" 2>/dev/null || true
+  sleep 1
+  pkill -9 -f "$BIN_NAME.bin daemon" 2>/dev/null || true
+  log "stopped running daemon"
+else
+  log "no running daemon"
 fi
 
 # --- Config ------------------------------------------------------------------
