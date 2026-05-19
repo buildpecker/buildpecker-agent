@@ -99,6 +99,7 @@ func RegisterNode(token string) error {
 	nodeId := fmt.Sprintf("%v", successData.Value["nodeId"])
 	tailscaleAuthKey := fmt.Sprintf("%v", successData.Value["tailscaleAuthKey"])
 	magicDnsSuffix := fmt.Sprintf("%v", successData.Value["magicDnsSuffix"])
+	cloudflareTunnelToken := fmt.Sprintf("%v", successData.Value["cloudflareTunnelToken"])
 
 	flag, err := system.IsNodeAlreadyConnectedToUser(userId)
 	if flag == "connected" {
@@ -110,6 +111,13 @@ func RegisterNode(token string) error {
 	if err != nil {
 		logger.ApiLogger.Printf("Node connection check failed: %v", err)
 		return fmt.Errorf("%v", err)
+	}
+
+	err = system.SetupCloudflared(cloudflareTunnelToken)
+	if err != nil {
+		logger.SystemLogger.Printf("Setup cloudflared failed: %v", err)
+		DeleteNode(nodeToken)
+		return fmt.Errorf("Error in saving node: %v", err)
 	}
 
 	//tailscale auth setup

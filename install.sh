@@ -3,9 +3,9 @@
 # forge-agent installer
 #
 # Installs the forge-agent VPS agent and its prerequisites (docker, nixpacks,
-# tailscale; the run user gets passwordless sudo for tailscale), fetches the
-# prebuilt binary from the git repository, installs it onto PATH, seeds
-# configuration, and spins up a Grafana Alloy container for log shipping.
+# tailscale, cloudflared; the run user gets passwordless sudo for tailscale),
+# fetches the prebuilt binary from the git repository, installs it onto PATH,
+# seeds configuration, and spins up a Grafana Alloy container for log shipping.
 #
 # Usage:
 #   sudo ./install.sh [options]
@@ -287,6 +287,38 @@ EOF
     rm -f "$tmp"
     err "generated sudoers rule failed validation; not installing it"
   fi
+}
+
+# cloudflared: the per-node tunnel client. Installed as a static host binary
+# (no systemd, no package manager). The tunnel itself is started later by the
+# agent (system.SetupCloudflared) once registration hands it a tunnel token.
+ensure_cloudflared() {
+  if have cloudflared; then
+    log "cloudflared present: $(cloudflared --version 2>/dev/null | head -1 || echo unknown)"
+    return
+  fi
+  log "cloudflared not found; installing static binary"
+
+  local arch bin_arch url dest
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64)  bin_arch="amd64" ;;
+    aarch64|arm64) bin_arch="arm64" ;;
+    armv7l|armv6l) bin_arch="arm" ;;
+    i386|i686)     bin_arch="386" ;;
+    *) warn "unsupported arch '$arch' for cloudflared; install it manually"; return ;;
+  esac
+
+  url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${bin_arch}"
+  dest="$PREFIX/cloudflared"
+  install -d "$PREFIX"
+  if ! curl -fsSL "$url" -o "$dest"; then
+    warn "cloudflared download failed ($url); install it manually"
+    return
+  fi
+  chmod 0755 "$dest"
+  have cloudflared || warn "$PREFIX not on PATH; cloudflared installed at $dest"
+  log "cloudflared installed: $("$dest" --version 2>/dev/null | head -1 || echo unknown)"
 }
 
 # ---------------------------------------------------------------------------
@@ -699,6 +731,19 @@ install_supervisor_cron() {
   # is up and never (re)starts it.
   watch_line="* * * * * /bin/bash -lc 'pgrep -f \"[${BIN_NAME:0:1}]${BIN_NAME:1}.bin daemon\" >/dev/null 2>&1 || { $start_cmd }'  $CRON_MARKER"
 
+  # cloudflared tunnel supervision. The token is written by the agent
+  # (system.SetupCloudflared) to ~/.forge/cloudflared.token (0600) at
+  # registration; until then both lines are a no-op (token file absent),
+  # mirroring the daemon's "harmless until you register" behaviour. Bracketed
+  # pgrep so the watchdog's own cmdline doesn't self-match.
+  local cf_bin cf_token cf_log cf_start
+  cf_bin="$PREFIX/cloudflared"
+  cf_token="$home/.forge/cloudflared.token"
+  cf_log="$home/.forge/cloudflared.log"
+  cf_start="nohup \"$cf_bin\" tunnel --no-autoupdate run --token \"\$(cat $cf_token)\" >> \"$cf_log\" 2>&1 &"
+  cf_reboot_line="@reboot /bin/bash -lc 'test -s $cf_token && { $cf_start }'  $CRON_MARKER"
+  cf_watch_line="* * * * * /bin/bash -lc 'test -s $cf_token && { pgrep -f \"[c]loudflared tunnel\" >/dev/null 2>&1 || { $cf_start }; }'  $CRON_MARKER"
+
   existing="$(crontab -u "$RUN_USER" -l 2>/dev/null || true)"
   # Drop ALL prior forge-agent cron lines so reinstall never duplicates.
   # Match two independent tokens: the current marker AND the log-redirect
@@ -710,10 +755,10 @@ install_supervisor_cron() {
     | grep -vF '/.forge/daemon.log' \
     || true)"
 
-  printf '%s\n%s\n%s\n' "$existing" "$reboot_line" "$watch_line" \
+  printf '%s\n%s\n%s\n%s\n%s\n' "$existing" "$reboot_line" "$watch_line" "$cf_reboot_line" "$cf_watch_line" \
     | sed '/^$/d' \
     | crontab -u "$RUN_USER" - \
-    && log "supervision installed (@reboot + per-minute watchdog for '$RUN_USER')" \
+    && log "supervision installed (@reboot + per-minute watchdog for daemon + cloudflared, '$RUN_USER')" \
     || warn "could not install crontab for '$RUN_USER'"
 }
 
@@ -728,6 +773,7 @@ main() {
   ensure_docker_network
   ensure_nixpacks
   ensure_tailscale
+  ensure_cloudflared
   install_binary
   write_config
   ensure_alloy

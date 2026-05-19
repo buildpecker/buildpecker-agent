@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"syscall"
 
 	ctypes "github.com/pthsarmah/forge-agent/types"
 	"github.com/pthsarmah/forge-agent/utils"
@@ -50,6 +52,64 @@ func SetupTailscaleAuth(authKey string, magicDnsSuffix string) error {
 		return fmt.Errorf("Could not run tailscale up: %v", err)
 	}
 
+	return nil
+}
+
+func SetupCloudflared(tunnelToken string) error {
+	logger, _ := utils.GetLoggerInstance()
+
+	if strings.TrimSpace(tunnelToken) == "" {
+		return fmt.Errorf("empty cloudflare tunnel token")
+	}
+
+	bin, err := exec.LookPath("cloudflared")
+	if err != nil {
+		return fmt.Errorf("cloudflared binary not on PATH (install.sh installs it): %v", err)
+	}
+
+	if out, err := exec.Command("pgrep", "-f", "cloudflared tunnel.*run").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
+		logger.SystemLogger.Println("cloudflared tunnel already running")
+		return nil
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("could not resolve home directory: %v", err)
+	}
+
+	forgeDir := filepath.Join(homeDir, ".forge")
+	if err := os.MkdirAll(forgeDir, 0755); err != nil {
+		return fmt.Errorf("could not create %s: %v", forgeDir, err)
+	}
+
+	tokenPath := filepath.Join(forgeDir, "cloudflared.token")
+	if err := os.WriteFile(tokenPath, []byte(tunnelToken), 0600); err != nil {
+		return fmt.Errorf("could not persist cloudflared token: %v", err)
+	}
+	if err := os.Chmod(tokenPath, 0600); err != nil {
+		return fmt.Errorf("could not secure cloudflared token: %v", err)
+	}
+
+	logFile, err := os.OpenFile(filepath.Join(forgeDir, "cloudflared.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("could not open cloudflared log: %v", err)
+	}
+	defer logFile.Close()
+
+	cmd := exec.Command(bin, "tunnel", "--no-autoupdate", "run", "--token", tunnelToken)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("could not start cloudflared: %v", err)
+	}
+
+	if err := cmd.Process.Release(); err != nil {
+		logger.SystemLogger.Printf("cloudflared process release warning: %v", err)
+	}
+
+	logger.SystemLogger.Println("cloudflared tunnel started")
 	return nil
 }
 
