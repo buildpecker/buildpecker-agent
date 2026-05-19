@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path"
-	"regexp"
 	"strings"
 
 	ctypes "github.com/pthsarmah/forge-agent/types"
@@ -43,9 +43,16 @@ var nixpackEnvs = map[string]string{
 	"NIXPACKS_NODE_VERSION": "22",
 }
 
-var dnsUnsafe = regexp.MustCompile(`[^a-z0-9-]+`)
+func freeHostPort() (int, error) {
+	l, err := net.Listen("tcp", ":0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
+}
 
-func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath string, framework string) error {
+func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath string, framework string) (int, error) {
 	logger, _ := utils.GetLoggerInstance()
 	depLog, _ := logger.GetDeploymentLogger(dep.Id)
 
@@ -83,18 +90,16 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		if depLog != nil {
 			depLog.Printf("Nixpack build failed: %v", err)
 		}
-		return fmt.Errorf("could not run command: %w", err)
+		return 0, fmt.Errorf("could not run command: %w", err)
 	}
 
-	sanitizedId := strings.ReplaceAll(dep.Id, "_", "-")
-
-	hostLabel := strings.ToLower(dep.Project.Name)
-	if hostLabel == "" {
-		hostLabel = strings.ToLower(dep.Name)
-	}
-	hostLabel = strings.Trim(dnsUnsafe.ReplaceAllString(hostLabel, "-"), "-")
-	if hostLabel == "" {
-		hostLabel = sanitizedId // last-resort fallback so the rule is valid
+	hostPort, err := freeHostPort()
+	if err != nil {
+		logger.DeployLogger.Printf("Allocate host port failed dep=%s: %v", dep.Id, err)
+		if depLog != nil {
+			depLog.Printf("Allocate host port failed: %v", err)
+		}
+		return 0, fmt.Errorf("could not allocate host port: %w", err)
 	}
 
 	rmCmd := exec.Command("docker", "rm", "-f", imageName)
@@ -111,17 +116,9 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 	args := []string{
 		"run",
 		"-d",
-		"--network", "forge",
 		"--name", imageName,
-		"--label", "traefik.enable=true",
-		"--label", "traefik.docker.network=forge",
-		"--label", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.parthajeet.xyz`)",
-			sanitizedId, hostLabel),
-		"--label", fmt.Sprintf("traefik.http.routers.%s.entrypoints=websecure", sanitizedId),
-		"--label", fmt.Sprintf("traefik.http.routers.%s.tls=true", sanitizedId),
-		"--label", fmt.Sprintf("traefik.http.routers.%s.tls.certresolver=le", sanitizedId),
-		"--label", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=3000",
-			sanitizedId),
+		"--restart", "unless-stopped",
+		"-p", fmt.Sprintf("127.0.0.1:%d:3000", hostPort),
 	}
 
 	for _, e := range envs {
@@ -142,18 +139,13 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		if depLog != nil {
 			depLog.Printf("Docker run failed: %v", err)
 		}
-		return fmt.Errorf("could not run command: %w", err)
+		return 0, fmt.Errorf("could not run command: %w", err)
 	}
 
-	logger.DeployLogger.Printf("Container running dep=%s image=%s", dep.Id, imageName)
+	logger.DeployLogger.Printf("Container running dep=%s image=%s port=%d", dep.Id, imageName, hostPort)
 	if depLog != nil {
-		depLog.Printf("Container running image=%s", imageName)
+		depLog.Printf("Container running image=%s port=%d", imageName, hostPort)
 	}
 
-	logger.DeployLogger.Printf("Hosted URL=%s.parthajeet.xyz", hostLabel)
-	if depLog != nil {
-		depLog.Printf("Hosted URL=%s.parthajeet.xyz", hostLabel)
-	}
-
-	return nil
+	return hostPort, nil
 }

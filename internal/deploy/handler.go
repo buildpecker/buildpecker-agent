@@ -34,7 +34,7 @@ func Handler(event string, args ...any) {
 			}
 
 			//set deployment status to processing
-			err := api.SetDeploymentStatus(dep, "processing")
+			err := api.SetDeploymentStatus(dep, "processing", 0)
 			if err != nil {
 				logger.DeployLogger.Printf("Set status processing failed dep=%s: %v", dep.Id, err)
 				if depLog != nil {
@@ -94,7 +94,7 @@ func Handler(event string, args ...any) {
 			}
 
 			//deploy
-			err = NixpackDeploy(dep, envs, path, framework)
+			hostPort, err := NixpackDeploy(dep, envs, path, framework)
 			if err != nil {
 				logger.DeployLogger.Printf("Nixpack deploy failed dep=%s: %v", dep.Id, err)
 				if depLog != nil {
@@ -104,7 +104,7 @@ func Handler(event string, args ...any) {
 			}
 
 			//set deployment status to completed
-			err = api.SetDeploymentStatus(dep, status)
+			err = api.SetDeploymentStatus(dep, status, hostPort)
 			if err != nil {
 				logger.DeployLogger.Printf("Set status completed failed dep=%s: %v", dep.Id, err)
 				if depLog != nil {

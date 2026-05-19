@@ -11,11 +11,14 @@ import (
 )
 
 // TODO: convert 'status' from string to a validated type later
-func SetDeploymentStatus(dep ctypes.Deployment, status string) error {
+func SetDeploymentStatus(dep ctypes.Deployment, status string, localPort int) error {
 	logger, _ := utils.GetLoggerInstance()
 	var data = map[string]any{
 		"id":     dep.Id,
 		"status": status,
+	}
+	if localPort > 0 {
+		data["localPort"] = localPort
 	}
 	_, err := CallHttpAction[any]("/deployments/status", data, true,
 		dep.NodeToken, http.MethodPatch)
