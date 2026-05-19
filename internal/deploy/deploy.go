@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
 	"strings"
 
 	ctypes "github.com/pthsarmah/forge-agent/types"
@@ -41,6 +42,8 @@ func runStreaming(cmd *exec.Cmd, sinks ...*log.Logger) error {
 var nixpackEnvs = map[string]string{
 	"NIXPACKS_NODE_VERSION": "22",
 }
+
+var dnsUnsafe = regexp.MustCompile(`[^a-z0-9-]+`)
 
 func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath string, framework string) error {
 	logger, _ := utils.GetLoggerInstance()
@@ -83,7 +86,16 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		return fmt.Errorf("could not run command: %w", err)
 	}
 
-	sanitizedId := strings.ReplaceAll(dep.Id, "_", "-") // routers must be DNS-safe
+	sanitizedId := strings.ReplaceAll(dep.Id, "_", "-")
+
+	hostLabel := strings.ToLower(dep.Project.Name)
+	if hostLabel == "" {
+		hostLabel = strings.ToLower(dep.Name)
+	}
+	hostLabel = strings.Trim(dnsUnsafe.ReplaceAllString(hostLabel, "-"), "-")
+	if hostLabel == "" {
+		hostLabel = sanitizedId // last-resort fallback so the rule is valid
+	}
 
 	rmCmd := exec.Command("docker", "rm", "-f", imageName)
 	if out, err := rmCmd.CombinedOutput(); err != nil {
@@ -104,7 +116,7 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		"--label", "traefik.enable=true",
 		"--label", "traefik.docker.network=forge",
 		"--label", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.parthajeet.xyz`)",
-			sanitizedId, sanitizedId),
+			sanitizedId, hostLabel),
 		"--label", fmt.Sprintf("traefik.http.routers.%s.entrypoints=websecure", sanitizedId),
 		"--label", fmt.Sprintf("traefik.http.routers.%s.tls=true", sanitizedId),
 		"--label", fmt.Sprintf("traefik.http.routers.%s.tls.certresolver=le", sanitizedId),
@@ -136,6 +148,11 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 	logger.DeployLogger.Printf("Container running dep=%s image=%s", dep.Id, imageName)
 	if depLog != nil {
 		depLog.Printf("Container running image=%s", imageName)
+	}
+
+	logger.DeployLogger.Printf("Hosted URL=%s.parthajeet.xyz", hostLabel)
+	if depLog != nil {
+		depLog.Printf("Hosted URL=%s.parthajeet.xyz", hostLabel)
 	}
 
 	return nil
