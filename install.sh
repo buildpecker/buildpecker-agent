@@ -20,6 +20,9 @@
 #       --otel-endpoint A OTEL_EXPORTER_OTLP_ENDPOINT value (default: localhost:4318)
 #       --loki-url URL    Loki base URL for Alloy (default: https://loki.parthajeet.xyz)
 #       --no-alloy        Skip the Grafana Alloy container
+#       --acme-email A    Let's Encrypt ACME contact email for Traefik
+#                         (default: admin@parthajeet.xyz)
+#       --no-traefik      Skip the Traefik reverse-proxy container
 #   -h, --help            Show this help and exit
 
 set -euo pipefail
@@ -35,8 +38,11 @@ CONVEX_SITE_URL="https://convex-site.parthajeet.xyz"
 OTEL_EXPORTER_OTLP_ENDPOINT="https://otel-collector.parthajeet.xyz"
 LOKI_URL="https://loki.parthajeet.xyz"
 INSTALL_ALLOY=1
+INSTALL_TRAEFIK=1
+ACME_EMAIL="admin@parthajeet.xyz"
 
 ALLOY_CONTAINER="alloy"
+TRAEFIK_CONTAINER="traefik"
 DOCKER_NETWORK="forge"
 
 BIN_NAME="forge-agent"
@@ -59,7 +65,7 @@ log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m==>\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
 need_root() {
   if [[ $EUID -ne 0 ]]; then
@@ -82,6 +88,8 @@ while [[ $# -gt 0 ]]; do
     --otel-endpoint)    OTEL_EXPORTER_OTLP_ENDPOINT="$2"; shift 2 ;;
     --loki-url)         LOKI_URL="$2"; shift 2 ;;
     --no-alloy)         INSTALL_ALLOY=0; shift ;;
+    --acme-email)       ACME_EMAIL="$2"; shift 2 ;;
+    --no-traefik)       INSTALL_TRAEFIK=0; shift ;;
     -h|--help)          usage ;;
     *)                  err "unknown option: $1 (see --help)" ;;
   esac
@@ -190,6 +198,19 @@ ensure_docker() {
   systemctl enable --now docker 2>/dev/null || warn "could not enable docker service (no systemd?)"
   have docker || err "docker still not on PATH after install"
   log "docker installed: $(docker --version)"
+}
+
+# The shared docker network every forge container (Alloy, Traefik, future app
+# containers) attaches to. Created once, up-front, so later steps can assume it.
+ensure_docker_network() {
+  have docker || return 0
+  if docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1; then
+    log "docker network present: $DOCKER_NETWORK"
+    return 0
+  fi
+  docker network create "$DOCKER_NETWORK" >/dev/null \
+    && log "created docker network: $DOCKER_NETWORK" \
+    || warn "could not create docker network: $DOCKER_NETWORK"
 }
 
 ensure_nixpacks() {
@@ -559,12 +580,6 @@ ensure_alloy() {
   # resent lines can't be deduplicated (you get N copies after N reinstalls).
   local host_name; host_name="$(hostname 2>/dev/null || echo forge-node)"
 
-  # Network the original `docker run` expects.
-  if ! docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1; then
-    docker network create "$DOCKER_NETWORK" >/dev/null \
-      && log "created docker network: $DOCKER_NETWORK"
-  fi
-
   # Recreate the container so it picks up the (possibly new) config.
   if docker ps -a --format '{{.Names}}' | grep -qx "$ALLOY_CONTAINER"; then
     docker rm -f "$ALLOY_CONTAINER" >/dev/null 2>&1 || true
@@ -583,6 +598,62 @@ ensure_alloy() {
       /etc/alloy/config.alloy >/dev/null \
     && log "alloy container started (http://localhost:12345)" \
     || warn "failed to start alloy container"
+}
+
+# ---------------------------------------------------------------------------
+# Traefik (reverse proxy + automatic TLS)
+#
+# Docker provider with exposedbydefault=false: only containers carrying
+# explicit `traefik.*` labels get routed (deployed apps don't yet — deploy.go
+# adds no labels/network, so wiring app routing is a separate change). TLS via
+# Let's Encrypt HTTP-01 challenge; acme.json is bind-mounted from the run
+# user's ~/.forge tree so certs survive container recreation. No dashboard.
+# ---------------------------------------------------------------------------
+ensure_traefik() {
+  if [[ $INSTALL_TRAEFIK -ne 1 ]]; then
+    log "skipping Traefik (--no-traefik)"
+    return
+  fi
+  have docker || { warn "docker missing; skipping Traefik"; return; }
+
+  local home acme_dir acme_file
+  home="$(run_user_home)"
+  acme_dir="$home/.forge/traefik/acme"
+  acme_file="$acme_dir/acme.json"
+
+  # Persist ACME certs across container recreation. Traefik refuses an
+  # acme.json that is more permissive than 0600.
+  mkdir -p "$acme_dir" || { warn "could not create $acme_dir; skipping Traefik"; return; }
+  [[ -f "$acme_file" ]] || : > "$acme_file"
+  chmod 600 "$acme_file"
+  chown -R "$RUN_USER": "$home/.forge/traefik" 2>/dev/null || true
+
+  # Recreate so flags/cert-store changes take effect.
+  if docker ps -a --format '{{.Names}}' | grep -qx "$TRAEFIK_CONTAINER"; then
+    docker rm -f "$TRAEFIK_CONTAINER" >/dev/null 2>&1 || true
+  fi
+
+  docker run \
+    -d \
+    -p 80:80 -p 443:443 \
+    -v /var/run/docker.sock:/var/run/docker.sock:ro \
+    -v "$acme_file":/acme.json \
+    --name "$TRAEFIK_CONTAINER" --network "$DOCKER_NETWORK" \
+    --restart unless-stopped \
+    traefik:latest \
+      --providers.docker=true \
+      --providers.docker.exposedbydefault=false \
+      --entrypoints.web.address=:80 \
+      --entrypoints.websecure.address=:443 \
+      --entrypoints.web.http.redirections.entrypoint.to=websecure \
+      --entrypoints.web.http.redirections.entrypoint.scheme=https \
+      --certificatesresolvers.le.acme.email="$ACME_EMAIL" \
+      --certificatesresolvers.le.acme.storage=/acme.json \
+      --certificatesresolvers.le.acme.httpchallenge=true \
+      --certificatesresolvers.le.acme.httpchallenge.entrypoint=web \
+      --api.dashboard=false >/dev/null \
+    && log "traefik container started (:80/:443, ACME resolver 'le', email $ACME_EMAIL)" \
+    || warn "failed to start traefik container"
 }
 
 # ---------------------------------------------------------------------------
@@ -643,11 +714,13 @@ main() {
   detect_pkg
   ensure_base_tools
   ensure_docker
+  ensure_docker_network
   ensure_nixpacks
   ensure_tailscale
   install_binary
   write_config
   ensure_alloy
+  ensure_traefik
   install_supervisor_cron
 
   local home; home="$(run_user_home)"
@@ -658,6 +731,9 @@ main() {
   echo "  config : $CONFIG_DIR/.env"
   if [[ $INSTALL_ALLOY -eq 1 ]]; then
     echo "  alloy  : $home/.forge/grafana/alloy/config.alloy (container '$ALLOY_CONTAINER', :12345)"
+  fi
+  if [[ $INSTALL_TRAEFIK -eq 1 ]]; then
+    echo "  traefik: container '$TRAEFIK_CONTAINER' (:80/:443, ACME -> $home/.forge/traefik/acme/acme.json)"
   fi
   echo
   echo "  Next steps (run as user '$RUN_USER' — NOT via sudo; the daemon reads"

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path"
@@ -83,12 +84,22 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		return fmt.Errorf("could not run command: %w", err)
 	}
 
-	//build and run
+	sanitizedId := strings.ReplaceAll(dep.Id, "_", "-") // routers must be DNS-safe
+
 	args := []string{
 		"run",
 		"-d",
-		"-p", "5555:3000",
-		"--name", fmt.Sprintf("%s", imageName),
+		"--network", "forge",
+		"--name", imageName,
+		"--label", "traefik.enable=true",
+		"--label", "traefik.docker.network=forge",
+		"--label", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.parthajeet.xyz`)",
+			sanitizedId, sanitizedId),
+		"--label", fmt.Sprintf("traefik.http.routers.%s.entrypoints=websecure", sanitizedId),
+		"--label", fmt.Sprintf("traefik.http.routers.%s.tls=true", sanitizedId),
+		"--label", fmt.Sprintf("traefik.http.routers.%s.tls.certresolver=le", sanitizedId),
+		"--label", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=3000",
+			sanitizedId),
 	}
 
 	for _, e := range envs {

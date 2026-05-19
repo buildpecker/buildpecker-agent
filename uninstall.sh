@@ -15,6 +15,7 @@
 #       --keep-config  Keep /etc/forge-agent (config) instead of removing it
 #       --keep-tailnet Do not log this device out of the tailnet
 #       --keep-alloy   Keep the Grafana Alloy container and its config
+#       --keep-traefik Keep the Traefik container and its ACME store
 #   -y, --yes          Do not prompt for confirmation
 #   -h, --help         Show this help and exit
 
@@ -24,18 +25,20 @@ PREFIX="/usr/local/bin"
 KEEP_CONFIG=0
 KEEP_TAILNET=0
 KEEP_ALLOY=0
+KEEP_TRAEFIK=0
 ASSUME_YES=0
 
 BIN_NAME="forge-agent"
 CONFIG_DIR="/etc/forge-agent"
 SUDOERS_PATH="/etc/sudoers.d/forge-agent-tailscale"
 ALLOY_CONTAINER="alloy"
+TRAEFIK_CONTAINER="traefik"
 
 log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m==>\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -47,6 +50,7 @@ run_user_home() {
   printf '%s' "$h"
 }
 ALLOY_CONFIG_DIR="$(run_user_home)/.forge/grafana/alloy"
+TRAEFIK_CONFIG_DIR="$(run_user_home)/.forge/traefik"
 RUN_USER="${SUDO_USER:-root}"
 CRON_MARKER="# forge-agent daemon (managed by install.sh)"
 
@@ -56,6 +60,7 @@ while [[ $# -gt 0 ]]; do
     --keep-config)  KEEP_CONFIG=1; shift ;;
     --keep-tailnet) KEEP_TAILNET=1; shift ;;
     --keep-alloy)   KEEP_ALLOY=1; shift ;;
+    --keep-traefik) KEEP_TRAEFIK=1; shift ;;
     -y|--yes)       ASSUME_YES=1; shift ;;
     -h|--help)     usage ;;
     *)             err "unknown option: $1 (see --help)" ;;
@@ -71,6 +76,7 @@ if [[ $ASSUME_YES -ne 1 ]]; then
   echo "  - sudoers : $SUDOERS_PATH"
   [[ $KEEP_TAILNET -ne 1 ]] && echo "  - tailnet : log this device out (tailscale logout)"
   [[ $KEEP_ALLOY -ne 1 ]] && echo "  - alloy   : container '$ALLOY_CONTAINER' + $ALLOY_CONFIG_DIR"
+  [[ $KEEP_TRAEFIK -ne 1 ]] && echo "  - traefik : container '$TRAEFIK_CONTAINER' + $TRAEFIK_CONFIG_DIR"
   echo "  - cron    : daemon supervision entries for '$RUN_USER'"
   echo "  (docker, nixpacks, tailscale binaries are left installed)"
   echo "  NOTE: a daemon started via 'forge-agent daemon &' is NOT stopped;"
@@ -130,6 +136,21 @@ else
   if [[ -d "$ALLOY_CONFIG_DIR" ]]; then
     rm -rf "$ALLOY_CONFIG_DIR"
     log "removed alloy config -> $ALLOY_CONFIG_DIR"
+  fi
+fi
+
+# --- Traefik -----------------------------------------------------------------
+if [[ $KEEP_TRAEFIK -eq 1 ]]; then
+  log "keeping Traefik (--keep-traefik)"
+else
+  if have docker && docker ps -a --format '{{.Names}}' | grep -qx "$TRAEFIK_CONTAINER"; then
+    docker rm -f "$TRAEFIK_CONTAINER" >/dev/null 2>&1 \
+      && log "removed traefik container -> $TRAEFIK_CONTAINER" \
+      || warn "failed to remove traefik container"
+  fi
+  if [[ -d "$TRAEFIK_CONFIG_DIR" ]]; then
+    rm -rf "$TRAEFIK_CONFIG_DIR"
+    log "removed traefik config -> $TRAEFIK_CONFIG_DIR"
   fi
 fi
 
