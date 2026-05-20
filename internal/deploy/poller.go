@@ -42,12 +42,29 @@ func Start(ctx context.Context) error {
 			deps, err := api.GetQueuedDeployments()
 			if err != nil {
 				logger.DeployLogger.Printf("Get queued deployments failed: %v", err)
+			} else {
+				for _, dep := range deps {
+					select {
+					case jobs <- ctypes.Job{Action: "start_deploy", Data: dep}:
+						logger.DeployLogger.Printf("Enqueued deployment %s", dep.Id)
+					case <-ctx.Done():
+						logger.DeployLogger.Printf("Deploy poller stopping mid-enqueue: %v", ctx.Err())
+						close(jobs)
+						wg.Wait()
+						return ctx.Err()
+					}
+				}
+			}
+
+			deletes, err := api.GetPendingDeletes()
+			if err != nil {
+				logger.DeployLogger.Printf("Get pending deletes failed: %v", err)
 				continue
 			}
-			for _, dep := range deps {
+			for _, dep := range deletes {
 				select {
-				case jobs <- ctypes.Job{Action: "start_deploy", Data: dep}:
-					logger.DeployLogger.Printf("Enqueued deployment %s", dep.Id)
+				case jobs <- ctypes.Job{Action: "start_delete", Data: dep}:
+					logger.DeployLogger.Printf("Enqueued delete %s", dep.Id)
 				case <-ctx.Done():
 					logger.DeployLogger.Printf("Deploy poller stopping mid-enqueue: %v", ctx.Err())
 					close(jobs)

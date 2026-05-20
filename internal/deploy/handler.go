@@ -1,12 +1,20 @@
 package deploy
 
 import (
+	"os/exec"
+	"path"
+	"strings"
+
 	"github.com/pthsarmah/forge-agent/internal/api"
 	//	"github.com/pthsarmah/forge-agent/internal/docker"
 	"github.com/pthsarmah/forge-agent/internal/git"
 	ctypes "github.com/pthsarmah/forge-agent/types"
 	"github.com/pthsarmah/forge-agent/utils"
 )
+
+func deriveImageName(repoUrl string) string {
+	return strings.ToLower(strings.TrimSuffix(path.Base(repoUrl), ".git"))
+}
 
 func Handler(event string, args ...any) {
 	logger, _ := utils.GetLoggerInstance()
@@ -122,6 +130,33 @@ func Handler(event string, args ...any) {
 		default:
 			logger.DeployLogger.Println("Invalid deployment provided for start_deploy")
 			return
+		}
+
+	case "start_delete":
+		if len(args) != 1 {
+			logger.DeployLogger.Println("Invalid no. of args for start_delete")
+			return
+		}
+
+		dep, ok := args[0].(ctypes.Deployment)
+		if !ok {
+			logger.DeployLogger.Println("Invalid deployment provided for start_delete")
+			return
+		}
+
+		imageName := deriveImageName(dep.Project.RepoUrl)
+		logger.DeployLogger.Printf("Stopping container for delete dep=%s image=%s", dep.Id, imageName)
+
+		rmCmd := exec.Command("docker", "rm", "-f", imageName)
+		if out, err := rmCmd.CombinedOutput(); err != nil {
+			logger.DeployLogger.Printf("docker rm dep=%s image=%s failed: %v output=%s",
+				dep.Id, imageName, err, strings.TrimSpace(string(out)))
+		} else {
+			logger.DeployLogger.Printf("docker rm dep=%s image=%s ok", dep.Id, imageName)
+		}
+
+		if err := api.FinalizeDelete(dep); err != nil {
+			logger.DeployLogger.Printf("Finalize delete dep=%s failed: %v", dep.Id, err)
 		}
 	}
 }
