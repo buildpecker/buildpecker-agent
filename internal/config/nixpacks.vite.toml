@@ -1,0 +1,18 @@
+[phases.setup]
+nixPkgs = ["...", "caddy"]
+
+[phases.build]
+cmds = [
+  "...",
+  """cat > Caddyfile <<'EOF'
+:80 {
+  root * dist
+  encode zstd gzip
+  try_files {path} /index.twig.html
+  file_server
+}
+EOF""",
+]
+
+[start]
+cmd = "caddy run --config Caddyfile --adapter caddyfile"

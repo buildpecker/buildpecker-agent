@@ -2,12 +2,14 @@ package deploy
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"strings"
 
 	ctypes "github.com/pthsarmah/forge-agent/types"
@@ -40,7 +42,7 @@ func runStreaming(cmd *exec.Cmd, sinks ...*log.Logger) error {
 }
 
 var nixpackEnvs = map[string]string{
-	"NIXPACKS_NODE_VERSION": "22",
+	"NIXPACKS_NODE_VERSION": "20",
 }
 
 func freeHostPort() (int, error) {
@@ -52,7 +54,71 @@ func freeHostPort() (int, error) {
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
+func updateIgnoreFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+
+	var lines []string
+	hasUnignore := false
+
+	for line := range strings.SplitSeq(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+
+		switch trimmed {
+		case ".nixpacks", ".nixpacks/", "/.nixpacks", "/.nixpacks/":
+			// remove ignore rule
+			continue
+		case "!.nixpacks", "!/.nixpacks":
+			hasUnignore = true
+		}
+
+		lines = append(lines, line)
+	}
+
+	if !hasUnignore {
+		lines = append(lines,
+			"!.nixpacks",
+			"!.nixpacks/**",
+		)
+	}
+
+	content := strings.Join(lines, "\n")
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
+func writeNixpacksConfig(cfg string) (string, error) {
+	dir, err := os.MkdirTemp("", "nixpacks-*")
+	if err != nil {
+		return "", err
+	}
+
+	cfgPath := filepath.Join(dir, "nixpacks.toml")
+
+	err = os.WriteFile(cfgPath, []byte(cfg), 0644)
+	if err != nil {
+		return "", err
+	}
+
+	return cfgPath, nil
+}
+
 func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath string, framework string) (int, error) {
+
+	//set .gitignore or .dockerignore flags to allow .nixpacks
+	noGitPath := strings.TrimSuffix(projectPath, ".git")
+	for _, name := range []string{".gitignore", ".dockerignore"} {
+		path := filepath.Join(noGitPath, name)
+
+		if err := updateIgnoreFile(path); err != nil {
+			return 0, fmt.Errorf("could not update %s: %w", name, err)
+		}
+	}
+
 	logger, _ := utils.GetLoggerInstance()
 	depLog, _ := logger.GetDeploymentLogger(dep.Id)
 
@@ -64,10 +130,22 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		depLog.Printf("Nixpack build start image=%s:%s framework=%s", imageName, versionNo, framework)
 	}
 
+	fwInfo := GetFrameworkInfo(framework)
+
 	//nixpack build
 	nixargs := []string{
 		"build", projectPath,
 		"--name", fmt.Sprintf("%s:%s", imageName, versionNo),
+	}
+
+	//custom toml if needed
+	if fwInfo.NixpacksToml != "" {
+		cfgPath, err := writeNixpacksConfig(fwInfo.NixpacksToml)
+		if err != nil {
+			return 0, err
+		}
+
+		nixargs = append(nixargs, "--config", cfgPath)
 	}
 
 	if pkgs := DetectNativePkgs(projectPath); len(pkgs) > 0 {
@@ -75,6 +153,7 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		if depLog != nil {
 			depLog.Printf("Injecting native build pkgs: %v", pkgs)
 		}
+
 		nixargs = append(nixargs, "--pkgs", strings.Join(pkgs, " "))
 	}
 
@@ -118,7 +197,7 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		"-d",
 		"--name", imageName,
 		"--restart", "unless-stopped",
-		"-p", fmt.Sprintf("127.0.0.1:%d:3000", hostPort),
+		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort, frameworkInfos[framework].Port),
 	}
 
 	for _, e := range envs {
