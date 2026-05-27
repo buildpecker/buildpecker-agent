@@ -8,7 +8,7 @@ cmds = [
 :80 {
   root * dist
   encode zstd gzip
-  try_files {path} /index.twig.html
+  try_files {path} /index.html
   file_server
 }
 EOF""",

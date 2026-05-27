@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"log"
 	"os/exec"
 	"path"
 	"strings"
@@ -59,7 +60,8 @@ func Handler(event string, args ...any) {
 				if depLog != nil {
 					depLog.Printf("Clone repo failed: %v", err)
 				}
-				status = "failed"
+				setStatus(dep, depLog, logger, "failed", 0)
+				return
 			}
 			if depLog != nil {
 				depLog.Printf("Repo cloned at %s", path)
@@ -72,11 +74,12 @@ func Handler(event string, args ...any) {
 				if depLog != nil {
 					depLog.Printf("Detect framework failed: %v", err)
 				}
-				status = "failed"
+				setStatus(dep, depLog, logger, "failed", 0)
+				return
 			}
-			logger.DeployLogger.Printf("Detected framework dep=%s framework=%s", dep.Id, framework)
+			logger.DeployLogger.Printf("Detected framework dep=%s framework=%s", dep.Id, framework.DisplayName)
 			if depLog != nil {
-				depLog.Printf("Detected framework: %s", framework)
+				depLog.Printf("Detected framework: %s", framework.DisplayName)
 			}
 
 			//set repo framework
@@ -86,7 +89,8 @@ func Handler(event string, args ...any) {
 				if depLog != nil {
 					depLog.Printf("Set project framework failed: %v", err)
 				}
-				status = "failed"
+				setStatus(dep, depLog, logger, "failed", 0)
+				return
 			}
 
 			envs, err := api.GetEnvironmentSecrets(dep)
@@ -95,7 +99,8 @@ func Handler(event string, args ...any) {
 				if depLog != nil {
 					depLog.Printf("Get env secrets failed: %v", err)
 				}
-				status = "failed"
+				setStatus(dep, depLog, logger, "failed", 0)
+				return
 			}
 			if depLog != nil {
 				depLog.Printf("Fetched %d env secrets", len(envs))
@@ -108,17 +113,12 @@ func Handler(event string, args ...any) {
 				if depLog != nil {
 					depLog.Printf("Nixpack deploy failed: %v", err)
 				}
-				status = "failed"
+				setStatus(dep, depLog, logger, "failed", 0)
+				return
 			}
 
 			//set deployment status to completed
-			err = api.SetDeploymentStatus(dep, status, hostPort)
-			if err != nil {
-				logger.DeployLogger.Printf("Set status completed failed dep=%s: %v", dep.Id, err)
-				if depLog != nil {
-					depLog.Printf("Set status completed failed: %v", err)
-				}
-			}
+			setStatus(dep, depLog, logger, "completed", hostPort)
 
 			if status == "completed" {
 				logger.DeployLogger.Printf("Deployment %s done", dep.Id)
@@ -157,6 +157,16 @@ func Handler(event string, args ...any) {
 
 		if err := api.FinalizeDelete(dep); err != nil {
 			logger.DeployLogger.Printf("Finalize delete dep=%s failed: %v", dep.Id, err)
+		}
+	}
+}
+
+func setStatus(dep ctypes.Deployment, depLog *log.Logger, logger *utils.Logger, status string, hostPort int) {
+	err := api.SetDeploymentStatus(dep, status, hostPort)
+	if err != nil {
+		logger.DeployLogger.Printf("Set status completed failed dep=%s: %v", dep.Id, err)
+		if depLog != nil {
+			depLog.Printf("Set status completed failed: %v", err)
 		}
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	ctypes "github.com/pthsarmah/forge-agent/types"
+	"github.com/pthsarmah/forge-agent/utils"
 	"log"
 	"net"
 	"os"
@@ -11,9 +13,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-
-	ctypes "github.com/pthsarmah/forge-agent/types"
-	"github.com/pthsarmah/forge-agent/utils"
 )
 
 // runStreaming starts cmd and fans every stdout/stderr line, live, into each
@@ -42,7 +41,8 @@ func runStreaming(cmd *exec.Cmd, sinks ...*log.Logger) error {
 }
 
 var nixpackEnvs = map[string]string{
-	"NIXPACKS_NODE_VERSION": "20",
+	"NIXPACKS_NODE_VERSION":    "22",
+	"NIXPACKS_NIXPKGS_ARCHIVE": "51ad838b03a05b1de6f9f2a0fffecee64a9788ee",
 }
 
 func freeHostPort() (int, error) {
@@ -107,7 +107,7 @@ func writeNixpacksConfig(cfg string) (string, error) {
 	return cfgPath, nil
 }
 
-func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath string, framework string) (int, error) {
+func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath string, framework ctypes.FrameworkInfo) (int, error) {
 
 	//set .gitignore or .dockerignore flags to allow .nixpacks
 	noGitPath := strings.TrimSuffix(projectPath, ".git")
@@ -125,12 +125,10 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 	imageName := strings.TrimSuffix(path.Base(projectPath), ".git")
 	versionNo := "v1"
 
-	logger.DeployLogger.Printf("Nixpack build start dep=%s image=%s:%s framework=%s", dep.Id, imageName, versionNo, framework)
+	logger.DeployLogger.Printf("Nixpack build start dep=%s image=%s:%s framework=%s", dep.Id, imageName, versionNo, framework.DisplayName)
 	if depLog != nil {
-		depLog.Printf("Nixpack build start image=%s:%s framework=%s", imageName, versionNo, framework)
+		depLog.Printf("Nixpack build start image=%s:%s framework=%s", imageName, versionNo, framework.DisplayName)
 	}
-
-	fwInfo := GetFrameworkInfo(framework)
 
 	//nixpack build
 	nixargs := []string{
@@ -138,9 +136,9 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		"--name", fmt.Sprintf("%s:%s", imageName, versionNo),
 	}
 
-	//custom toml if needed
-	if fwInfo.NixpacksToml != "" {
-		cfgPath, err := writeNixpacksConfig(fwInfo.NixpacksToml)
+	//custom toml for static builds if needed
+	if framework.NixpacksToml != "" && framework.StaticBuild {
+		cfgPath, err := writeNixpacksConfig(framework.NixpacksToml)
 		if err != nil {
 			return 0, err
 		}
@@ -197,7 +195,7 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		"-d",
 		"--name", imageName,
 		"--restart", "unless-stopped",
-		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort, frameworkInfos[framework].Port),
+		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort, framework.DefaultPort),
 	}
 
 	for _, e := range envs {
