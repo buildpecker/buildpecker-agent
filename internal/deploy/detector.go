@@ -158,7 +158,19 @@ func detectVite(path string, pkg PackageJSON) (ctypes.FrameworkInfo, bool, error
 		"vite",
 	)
 
-	if hasConfig && hasDep && hasScript {
+	counter := 0
+	switch {
+	case hasConfig:
+		counter++
+		fallthrough
+	case hasDep:
+		counter++
+		fallthrough
+	case hasScript:
+		counter++
+	}
+
+	if counter >= 2 {
 		return config.GetFrameworkInfo(string(config.FrameworkVite)), true, nil
 	}
 

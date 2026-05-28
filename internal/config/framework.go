@@ -22,12 +22,11 @@ var frameworkInfos = map[ctypes.Framework]ctypes.FrameworkInfo{
 		StaticBuild: false,
 	},
 	FrameworkVite: {
-		Id:           "vite",
-		DisplayName:  "Vite",
-		DefaultPort:  80,
-		BuildFolder:  "dist",
-		StaticBuild:  true,
-		NixpacksToml: NixpacksViteToml,
+		Id:          "vite",
+		DisplayName: "Vite",
+		DefaultPort: 80,
+		BuildFolder: "dist",
+		StaticBuild: true,
 	},
 	FrameworkSvelte: {
 		Id:           "svelte",
@@ -46,11 +45,12 @@ var frameworkInfos = map[ctypes.Framework]ctypes.FrameworkInfo{
 		NixpacksToml: NixpacksViteToml,
 	},
 	FrameworkSvelteKitNode: {
-		Id:          "svelte-kit-node",
-		DisplayName: "SvelteKit (Node Adapter)",
-		DefaultPort: 3000,
-		BuildFolder: "dist",
-		StaticBuild: false,
+		Id:           "svelte-kit-node",
+		DisplayName:  "SvelteKit (Node Adapter)",
+		DefaultPort:  3000,
+		BuildFolder:  "dist",
+		StaticBuild:  false,
+		NixpacksToml: NixpacksSvelteNodeToml,
 	},
 }
 

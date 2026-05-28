@@ -137,7 +137,7 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 	}
 
 	//custom toml for static builds if needed
-	if framework.NixpacksToml != "" && framework.StaticBuild {
+	if framework.NixpacksToml != "" {
 		cfgPath, err := writeNixpacksConfig(framework.NixpacksToml)
 		if err != nil {
 			return 0, err
@@ -155,12 +155,14 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		nixargs = append(nixargs, "--pkgs", strings.Join(pkgs, " "))
 	}
 
-	cmd := exec.Command("nixpacks", nixargs...)
-
-	cmd.Env = os.Environ()
 	for k, v := range nixpackEnvs {
-		cmd.Env = append(cmd.Env, k+"="+v)
+		nixargs = append(nixargs,
+			"--env",
+			k+"="+v,
+		)
 	}
+
+	cmd := exec.Command("nixpacks", nixargs...)
 
 	if err := runStreaming(cmd, logger.DeployLogger, depLog); err != nil {
 		logger.DeployLogger.Printf("Nixpack build failed dep=%s: %v", dep.Id, err)
