@@ -24,7 +24,7 @@ var frameworkInfos = map[ctypes.Framework]ctypes.FrameworkInfo{
 	FrameworkVite: {
 		Id:          "vite",
 		DisplayName: "Vite",
-		DefaultPort: 80,
+		DefaultPort: 3000,
 		BuildFolder: "dist",
 		StaticBuild: true,
 	},

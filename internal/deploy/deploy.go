@@ -40,11 +40,6 @@ func runStreaming(cmd *exec.Cmd, sinks ...*log.Logger) error {
 	return cmd.Wait()
 }
 
-var nixpackEnvs = map[string]string{
-	"NIXPACKS_NODE_VERSION":    "22",
-	"NIXPACKS_NIXPKGS_ARCHIVE": "51ad838b03a05b1de6f9f2a0fffecee64a9788ee",
-}
-
 func freeHostPort() (int, error) {
 	l, err := net.Listen("tcp", ":0")
 	if err != nil {
@@ -109,6 +104,11 @@ func writeNixpacksConfig(cfg string) (string, error) {
 
 func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath string, framework ctypes.FrameworkInfo) (int, error) {
 
+	var nixpackEnvs = map[string]string{
+		"NIXPACKS_NODE_VERSION":    "22",
+		"NIXPACKS_NIXPKGS_ARCHIVE": "51ad838b03a05b1de6f9f2a0fffecee64a9788ee",
+	}
+
 	//set .gitignore or .dockerignore flags to allow .nixpacks
 	noGitPath := strings.TrimSuffix(projectPath, ".git")
 	for _, name := range []string{".gitignore", ".dockerignore"} {
@@ -144,6 +144,7 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		}
 
 		nixargs = append(nixargs, "--config", cfgPath)
+		nixpackEnvs["NIXPACKS_CONFIG_FILE"] = cfgPath
 	}
 
 	if pkgs := DetectNativePkgs(projectPath); len(pkgs) > 0 {
