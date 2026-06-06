@@ -42,6 +42,16 @@ func Handler(event string, args ...any) {
 				return
 			}
 
+			if dep.ProjectId == "" || dep.Project.RepoUrl == "" {
+				logger.DeployLogger.Printf("Malformed project deployment dep=%s type=%q projectId=%q repo=%q; failing",
+					dep.Id, dep.Type, dep.ProjectId, dep.Project.RepoUrl)
+				if depLog != nil {
+					depLog.Println("Malformed deployment: missing project/repo; marking failed")
+				}
+				setStatus(dep, depLog, logger, "failed", 0)
+				return
+			}
+
 			logger.DeployLogger.Printf("Handling deployment %s repo=%s", dep.Id, dep.Project.RepoUrl)
 			if depLog != nil {
 				depLog.Printf("Handling deployment repo=%s", dep.Project.RepoUrl)
