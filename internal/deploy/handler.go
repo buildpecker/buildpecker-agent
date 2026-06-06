@@ -37,6 +37,11 @@ func Handler(event string, args ...any) {
 			dep := args[0].(ctypes.Deployment)
 			depLog, _ := logger.GetDeploymentLogger(dep.Id)
 
+			if dep.Type == "infra" {
+				handleInfraDeploy(dep, depLog, logger)
+				return
+			}
+
 			logger.DeployLogger.Printf("Handling deployment %s repo=%s", dep.Id, dep.Project.RepoUrl)
 			if depLog != nil {
 				depLog.Printf("Handling deployment repo=%s", dep.Project.RepoUrl)
@@ -144,6 +149,16 @@ func Handler(event string, args ...any) {
 			return
 		}
 
+		if dep.Type == "infra" {
+			if err := InfraDelete(dep); err != nil {
+				logger.DeployLogger.Printf("Infra delete dep=%s failed: %v", dep.Id, err)
+			}
+			if err := api.FinalizeDelete(dep); err != nil {
+				logger.DeployLogger.Printf("Finalize delete dep=%s failed: %v", dep.Id, err)
+			}
+			return
+		}
+
 		imageName := deriveImageName(dep.Project.RepoUrl)
 		logger.DeployLogger.Printf("Stopping container for delete dep=%s image=%s", dep.Id, imageName)
 
@@ -158,6 +173,54 @@ func Handler(event string, args ...any) {
 		if err := api.FinalizeDelete(dep); err != nil {
 			logger.DeployLogger.Printf("Finalize delete dep=%s failed: %v", dep.Id, err)
 		}
+	}
+}
+
+func handleInfraDeploy(dep ctypes.Deployment, depLog *log.Logger, logger *utils.Logger) {
+	logger.DeployLogger.Printf("Handling infra deployment %s template=%s", dep.Id, dep.Infra.Template.Identifier)
+	if depLog != nil {
+		depLog.Printf("Handling infra deployment template=%s", dep.Infra.Template.Identifier)
+	}
+
+	if err := api.SetDeploymentStatus(dep, "processing", 0); err != nil {
+		logger.DeployLogger.Printf("Set status processing failed dep=%s: %v", dep.Id, err)
+		if depLog != nil {
+			depLog.Printf("Set status processing failed: %v", err)
+		}
+	}
+
+	envs, err := api.GetEnvironmentSecrets(dep)
+	if err != nil {
+		logger.DeployLogger.Printf("Get infra env secrets failed dep=%s: %v", dep.Id, err)
+		if depLog != nil {
+			depLog.Printf("Get env secrets failed: %v", err)
+		}
+		setStatus(dep, depLog, logger, "failed", 0)
+		return
+	}
+	if depLog != nil {
+		depLog.Printf("Fetched %d env secrets", len(envs))
+	}
+
+	portMap, err := InfraDeploy(dep, envs)
+	if err != nil {
+		logger.DeployLogger.Printf("Infra deploy failed dep=%s: %v", dep.Id, err)
+		if depLog != nil {
+			depLog.Printf("Infra deploy failed: %v", err)
+		}
+		setStatus(dep, depLog, logger, "failed", 0)
+		return
+	}
+
+	if err := api.SetInfraDeploymentStatus(dep, "completed", portMap); err != nil {
+		logger.DeployLogger.Printf("Set infra status completed failed dep=%s: %v", dep.Id, err)
+		if depLog != nil {
+			depLog.Printf("Set status completed failed: %v", err)
+		}
+	}
+	logger.DeployLogger.Printf("Infra deployment %s done", dep.Id)
+	if depLog != nil {
+		depLog.Println("Infra deployment done")
 	}
 }
 

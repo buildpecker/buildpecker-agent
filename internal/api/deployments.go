@@ -31,6 +31,26 @@ func SetDeploymentStatus(dep ctypes.Deployment, status string, localPort int) er
 	return err
 }
 
+func SetInfraDeploymentStatus(dep ctypes.Deployment, status string, portMap []ctypes.PortMapEntry) error {
+	logger, _ := utils.GetLoggerInstance()
+	var data = map[string]any{
+		"id":     dep.Id,
+		"status": status,
+	}
+	if len(portMap) > 0 {
+		data["portMap"] = portMap
+	}
+	_, err := CallHttpAction[any]("/deployments/status", data, true,
+		dep.NodeToken, http.MethodPatch)
+
+	if err != nil {
+		logger.ApiLogger.Printf("Set infra deployment %s status=%s failed: %v", dep.Id, status, err)
+	} else {
+		logger.ApiLogger.Printf("Infra deployment %s status=%s routes=%d", dep.Id, status, len(portMap))
+	}
+	return err
+}
+
 func GetQueuedDeployments() ([]ctypes.Deployment, error) {
 	logger, _ := utils.GetLoggerInstance()
 	nodes, err := system.GetAllNodes()
