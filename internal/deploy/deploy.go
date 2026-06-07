@@ -40,6 +40,22 @@ func runStreaming(cmd *exec.Cmd, sinks ...*log.Logger) error {
 	return cmd.Wait()
 }
 
+func filterPublicEnvs(envs []ctypes.EnvVar, prefixes []string) []ctypes.EnvVar {
+	if len(prefixes) == 0 {
+		return nil
+	}
+	var out []ctypes.EnvVar
+	for _, e := range envs {
+		for _, p := range prefixes {
+			if strings.HasPrefix(e.Key, p) {
+				out = append(out, e)
+				break
+			}
+		}
+	}
+	return out
+}
+
 func freeHostPort() (int, error) {
 	l, err := net.Listen("tcp", ":0")
 	if err != nil {
@@ -161,6 +177,20 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 			"--env",
 			k+"="+v,
 		)
+	}
+
+	buildEnvs := filterPublicEnvs(envs, framework.PublicEnvPrefixes)
+	for _, e := range buildEnvs {
+		nixargs = append(nixargs,
+			"--env",
+			e.Key+"="+e.Value,
+		)
+	}
+	if len(buildEnvs) > 0 {
+		logger.DeployLogger.Printf("Injecting %d public build envs dep=%s framework=%s", len(buildEnvs), dep.Id, framework.Id)
+		if depLog != nil {
+			depLog.Printf("Injecting %d public build envs", len(buildEnvs))
+		}
 	}
 
 	cmd := exec.Command("nixpacks", nixargs...)
