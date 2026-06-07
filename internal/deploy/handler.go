@@ -21,6 +21,19 @@ func Handler(event string, args ...any) {
 	logger, _ := utils.GetLoggerInstance()
 
 	switch event {
+	case "postinstall":
+		if len(args) != 1 {
+			logger.DeployLogger.Println("Invalid no. of args for postinstall")
+			return
+		}
+		run, ok := args[0].(ctypes.PostInstallRun)
+		if !ok {
+			logger.DeployLogger.Println("Invalid run provided for postinstall")
+			return
+		}
+		handlePostInstall(run)
+		return
+
 	case "start_deploy":
 		if len(args) == 0 {
 			logger.DeployLogger.Println("No deployment provided for start_deploy")

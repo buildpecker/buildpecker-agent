@@ -72,6 +72,23 @@ func Start(ctx context.Context) error {
 					return ctx.Err()
 				}
 			}
+
+			postInstalls, err := api.GetQueuedPostInstalls()
+			if err != nil {
+				logger.DeployLogger.Printf("Get queued postinstalls failed: %v", err)
+				continue
+			}
+			for _, run := range postInstalls {
+				select {
+				case jobs <- ctypes.Job{Action: "postinstall", Data: run}:
+					logger.DeployLogger.Printf("Enqueued postinstall %s", run.Id)
+				case <-ctx.Done():
+					logger.DeployLogger.Printf("Deploy poller stopping mid-enqueue: %v", ctx.Err())
+					close(jobs)
+					wg.Wait()
+					return ctx.Err()
+				}
+			}
 		}
 	}
 }

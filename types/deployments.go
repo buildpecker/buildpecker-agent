@@ -47,3 +47,13 @@ type PortMapEntry struct {
 	ContainerPort int `json:"containerPort"`
 	PublishedPort int `json:"publishedPort"`
 }
+
+type PostInstallRun struct {
+	Id            string `json:"_id"`
+	DeploymentId  string `json:"deploymentId"`
+	Name          string `json:"name"`
+	Service       string `json:"service"`
+	Command       string `json:"command"`
+	ContainerName string `json:"containerName"`
+	NodeToken     string `json:"nodeToken,omitempty"`
+}
