@@ -163,14 +163,15 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		nixpackEnvs["NIXPACKS_CONFIG_FILE"] = cfgPath
 	}
 
+	runtimePkgs := []string{"wget"}
 	if pkgs := DetectNativePkgs(projectPath); len(pkgs) > 0 {
-		logger.DeployLogger.Printf("Injecting native build pkgs dep=%s pkgs=%v", dep.Id, pkgs)
-		if depLog != nil {
-			depLog.Printf("Injecting native build pkgs: %v", pkgs)
-		}
-
-		nixargs = append(nixargs, "--pkgs", strings.Join(pkgs, " "))
+		runtimePkgs = append(runtimePkgs, pkgs...)
 	}
+	logger.DeployLogger.Printf("Injecting build/runtime pkgs dep=%s pkgs=%v", dep.Id, runtimePkgs)
+	if depLog != nil {
+		depLog.Printf("Injecting build/runtime pkgs: %v", runtimePkgs)
+	}
+	nixargs = append(nixargs, "--pkgs", strings.Join(runtimePkgs, " "))
 
 	for k, v := range nixpackEnvs {
 		nixargs = append(nixargs,
@@ -223,11 +224,23 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		}
 	}
 
+	baseURL := strings.TrimRight(os.Getenv("CONVEX_SITE_URL"), "/")
+	if baseURL == "" {
+		return 0, fmt.Errorf("CONVEX_SITE_URL is empty")
+	}
+
+	healthURL := fmt.Sprintf("%s/deployments/health/%s?token=%s", baseURL, dep.Id, dep.HealthToken)
+
 	args := []string{
 		"run",
 		"-d",
 		"--name", imageName,
 		"--restart", "unless-stopped",
+		"--health-cmd", fmt.Sprintf("wget --no-verbose --tries=1 --spider '%s' || exit 1", healthURL),
+		"--health-interval", "30s",
+		"--health-timeout", "5s",
+		"--health-retries", "3",
+		"--health-start-period", "10s",
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort, framework.DefaultPort),
 	}
 

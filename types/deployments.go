@@ -18,6 +18,7 @@ type Deployment struct {
 	ImageUri     string       `json:"imageUri"`
 	Branch       string       `json:"branch"`
 	Sha          string       `json:"sha"`
+	HealthToken  string       `json:"healthToken,omitempty"`
 	Project      Project      `json:"project"`
 	Infra        Infra        `json:"infra"`
 	Routes       []InfraRoute `json:"routes"`
