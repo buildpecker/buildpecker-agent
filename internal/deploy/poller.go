@@ -31,6 +31,9 @@ func Start(ctx context.Context) error {
 	//poller ticker
 	ticker := time.NewTicker(5 * time.Second)
 
+	//infra health ticker (slower; runs container-side commands)
+	healthTicker := time.NewTicker(30 * time.Second)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -38,6 +41,24 @@ func Start(ctx context.Context) error {
 			close(jobs)
 			wg.Wait()
 			return ctx.Err()
+
+		case <-healthTicker.C:
+			targets, err := api.GetInfraHealthChecks()
+			if err != nil {
+				logger.DeployLogger.Printf("Get infra health checks failed: %v", err)
+				continue
+			}
+			for _, target := range targets {
+				select {
+				case jobs <- ctypes.Job{Action: "infra_health", Data: target}:
+				case <-ctx.Done():
+					logger.DeployLogger.Printf("Deploy poller stopping mid-enqueue: %v", ctx.Err())
+					close(jobs)
+					wg.Wait()
+					return ctx.Err()
+				}
+			}
+
 		case <-ticker.C:
 			deps, err := api.GetQueuedDeployments()
 			if err != nil {

@@ -58,3 +58,12 @@ type PostInstallRun struct {
 	ContainerName string `json:"containerName"`
 	NodeToken     string `json:"nodeToken,omitempty"`
 }
+
+type InfraHealthTarget struct {
+	DeploymentId  string `json:"deploymentId"`
+	HealthToken   string `json:"healthToken"`
+	ContainerName string `json:"containerName"`
+	Service       string `json:"service"`
+	Command       string `json:"command"`
+	NodeToken     string `json:"nodeToken,omitempty"`
+}

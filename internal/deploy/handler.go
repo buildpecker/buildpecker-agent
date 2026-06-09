@@ -34,6 +34,19 @@ func Handler(event string, args ...any) {
 		handlePostInstall(run)
 		return
 
+	case "infra_health":
+		if len(args) != 1 {
+			logger.DeployLogger.Println("Invalid no. of args for infra_health")
+			return
+		}
+		target, ok := args[0].(ctypes.InfraHealthTarget)
+		if !ok {
+			logger.DeployLogger.Println("Invalid target provided for infra_health")
+			return
+		}
+		handleInfraHealth(target)
+		return
+
 	case "start_deploy":
 		if len(args) == 0 {
 			logger.DeployLogger.Println("No deployment provided for start_deploy")
