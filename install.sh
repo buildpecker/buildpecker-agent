@@ -615,7 +615,7 @@ ensure_alloy() {
     -v "$log_dir":/var/log/forge:ro \
     -v "$data_dir":/var/lib/alloy/data \
     --hostname "$host_name" \
-    -p 12345:12345 --name "$ALLOY_CONTAINER" --network "$DOCKER_NETWORK" \
+    -p 127.0.0.1:12345:12345 --name "$ALLOY_CONTAINER" --network "$DOCKER_NETWORK" \
     --restart unless-stopped \
     grafana/alloy:latest \
       run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data \
