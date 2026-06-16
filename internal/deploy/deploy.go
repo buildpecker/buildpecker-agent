@@ -237,6 +237,7 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		"--name", imageName,
 		"--restart", "unless-stopped",
 		"--health-cmd", fmt.Sprintf("wget --no-verbose --tries=1 --spider '%s' || exit 1", healthURL),
+		"--network", "forge",
 		"--health-interval", "30s",
 		"--health-timeout", "5s",
 		"--health-retries", "3",
