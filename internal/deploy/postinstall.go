@@ -11,14 +11,23 @@ import (
 func handlePostInstall(run ctypes.PostInstallRun) {
 	logger, _ := utils.GetLoggerInstance()
 
-	project := composeProjectName(run.ContainerName, run.DeploymentId)
-	logger.DeployLogger.Printf("Postinstall run=%s name=%q project=%s service=%s", run.Id, run.Name, project, run.Service)
-
-	cmd := exec.Command(
-		"docker", "compose", "-p", project,
-		"exec", "-T", run.Service,
-		"sh", "-c", run.Command,
-	)
+	var cmd *exec.Cmd
+	if run.Type == "project" {
+		container := deriveImageName(run.RepoUrl)
+		logger.DeployLogger.Printf("Postinstall run=%s name=%q container=%s", run.Id, run.Name, container)
+		cmd = exec.Command(
+			"docker", "exec", "-i", container,
+			"sh", "-c", run.Command,
+		)
+	} else {
+		project := composeProjectName(run.ContainerName, run.DeploymentId)
+		logger.DeployLogger.Printf("Postinstall run=%s name=%q project=%s service=%s", run.Id, run.Name, project, run.Service)
+		cmd = exec.Command(
+			"docker", "compose", "-p", project,
+			"exec", "-T", run.Service,
+			"sh", "-c", run.Command,
+		)
+	}
 
 	out, err := cmd.CombinedOutput()
 	exitCode := 0

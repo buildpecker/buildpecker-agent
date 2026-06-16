@@ -55,7 +55,9 @@ type PostInstallRun struct {
 	Name          string `json:"name"`
 	Service       string `json:"service"`
 	Command       string `json:"command"`
+	Type          string `json:"type"`
 	ContainerName string `json:"containerName"`
+	RepoUrl       string `json:"repoUrl"`
 	NodeToken     string `json:"nodeToken,omitempty"`
 }
 
