@@ -3,10 +3,9 @@
 # forge-agent uninstaller
 #
 # Stops the running forge-agent daemon and removes the binary, wrapper, config,
-# the passwordless-tailscale sudoers rule, the Grafana Alloy container/config,
-# and the cloudflared binary + tunnel token (the running tunnel IS stopped — it
-# exposes the node). Prerequisites (docker, nixpacks, tailscale) are left
-# installed.
+# the Grafana Alloy container/config, and the cloudflared binary + tunnel token
+# (the running tunnel IS stopped — it exposes the node). Prerequisites (docker,
+# nixpacks) are left installed.
 #
 # Usage:
 #   sudo ./uninstall.sh [options]
@@ -14,7 +13,6 @@
 # Options:
 #   -p, --prefix DIR   Dir the binary was installed to (default: /usr/local/bin)
 #       --keep-config  Keep /etc/forge-agent (config) instead of removing it
-#       --keep-tailnet Do not log this device out of the tailnet
 #       --keep-alloy   Keep the Grafana Alloy container and its config
 #       --keep-traefik Keep the Traefik container and its ACME store
 #       --keep-cloudflared Keep the cloudflared binary, token, and running tunnel
@@ -25,7 +23,6 @@ set -euo pipefail
 
 PREFIX="/usr/local/bin"
 KEEP_CONFIG=0
-KEEP_TAILNET=0
 KEEP_ALLOY=0
 KEEP_TRAEFIK=0
 KEEP_CLOUDFLARED=0
@@ -33,7 +30,6 @@ ASSUME_YES=0
 
 BIN_NAME="forge-agent"
 CONFIG_DIR="/etc/forge-agent"
-SUDOERS_PATH="/etc/sudoers.d/forge-agent-tailscale"
 ALLOY_CONTAINER="alloy"
 TRAEFIK_CONTAINER="traefik"
 
@@ -41,7 +37,7 @@ log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m==>\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -63,7 +59,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -p|--prefix)    PREFIX="$2"; shift 2 ;;
     --keep-config)  KEEP_CONFIG=1; shift ;;
-    --keep-tailnet) KEEP_TAILNET=1; shift ;;
     --keep-alloy)   KEEP_ALLOY=1; shift ;;
     --keep-traefik) KEEP_TRAEFIK=1; shift ;;
     --keep-cloudflared) KEEP_CLOUDFLARED=1; shift ;;
@@ -80,13 +75,11 @@ if [[ $ASSUME_YES -ne 1 ]]; then
   echo "  - daemon  : running '$BIN_NAME daemon' is stopped"
   echo "  - binary  : $PREFIX/$BIN_NAME, $PREFIX/$BIN_NAME.bin"
   [[ $KEEP_CONFIG -ne 1 ]] && echo "  - config  : $CONFIG_DIR"
-  echo "  - sudoers : $SUDOERS_PATH"
-  [[ $KEEP_TAILNET -ne 1 ]] && echo "  - tailnet : log this device out (tailscale logout)"
   [[ $KEEP_ALLOY -ne 1 ]] && echo "  - alloy   : container '$ALLOY_CONTAINER' + $ALLOY_CONFIG_DIR"
   [[ $KEEP_TRAEFIK -ne 1 ]] && echo "  - traefik : container '$TRAEFIK_CONTAINER' + $TRAEFIK_CONFIG_DIR"
   [[ $KEEP_CLOUDFLARED -ne 1 ]] && echo "  - cflared : $PREFIX/cloudflared + token; running tunnel STOPPED"
   echo "  - cron    : daemon supervision entries for '$RUN_USER'"
-  echo "  (docker, nixpacks, tailscale binaries are left installed)"
+  echo "  (docker, nixpacks binaries are left installed)"
   read -r -p "Proceed? [y/N] " ans
   case "$ans" in
     y|Y|yes|YES) : ;;
@@ -104,12 +97,6 @@ for f in "$PREFIX/$BIN_NAME" "$PREFIX/$BIN_NAME.bin"; do
   fi
 done
 [[ $removed_any -eq 0 ]] && warn "no binary found under $PREFIX"
-
-# --- sudoers (passwordless tailscale) ----------------------------------------
-if [[ -f "$SUDOERS_PATH" ]]; then
-  rm -f "$SUDOERS_PATH"
-  log "removed sudoers rule -> $SUDOERS_PATH"
-fi
 
 # --- Reboot crontab ----------------------------------------------------------
 if have crontab; then
@@ -193,25 +180,4 @@ else
   done
 fi
 
-# --- Tailnet -----------------------------------------------------------------
-# Deregister this node from the tailnet. `tailscale logout` drops the node's
-# auth key so it no longer appears as an active device. The tailscaled daemon
-# and the tailscale binary stay installed.
-if [[ $KEEP_TAILNET -eq 1 ]]; then
-  log "keeping tailnet membership (--keep-tailnet)"
-elif have tailscale; then
-  state="$(tailscale status --json 2>/dev/null | grep -o '"BackendState":[^,]*' | head -1 || true)"
-  if [[ -z "$state" || "$state" == *NeedsLogin* || "$state" == *NoState* ]]; then
-    log "tailscale not logged in; nothing to deregister"
-  else
-    if tailscale logout 2>/dev/null; then
-      log "device logged out of tailnet"
-    else
-      warn "tailscale logout failed; remove the device manually from the admin console"
-    fi
-  fi
-else
-  warn "tailscale binary not found; skipping tailnet logout"
-fi
-
-log "done. docker, nixpacks, tailscale binaries left untouched."
+log "done. docker, nixpacks binaries left untouched."

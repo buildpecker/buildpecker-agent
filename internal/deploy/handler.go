@@ -96,7 +96,7 @@ func Handler(event string, args ...any) {
 
 			//clone repo if not already cloned
 			path, err := git.CloneRepo(dep.Project.RepoUrl, dep.Id)
-			if err != nil && path == "" {
+			if err != nil {
 				logger.DeployLogger.Printf("Clone repo failed dep=%s: %v", dep.Id, err)
 				if depLog != nil {
 					depLog.Printf("Clone repo failed: %v", err)

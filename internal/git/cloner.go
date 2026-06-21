@@ -63,8 +63,28 @@ func CloneRepo(repoUrl string, deploymentID string) (string, error) {
 	pathDir := projectDir + "/" + path
 	_, err = os.Stat(pathDir)
 	if err == nil {
-		logf("Repository already exists at %s, not cloning", pathDir)
-		return pathDir, fmt.Errorf("Repository already exists in path. Not cloning...\n")
+		logf("Repository already exists at %s, not cloning, syncing to remote instead", pathDir)
+
+		fetch := exec.Command("git", "-C", pathDir, "fetch", "--prune", "origin")
+		if out, ferr := fetch.CombinedOutput(); ferr != nil {
+			logf("[ERROR] Could not fetch from origin: %v: %s", ferr, strings.TrimSpace(string(out)))
+			return pathDir, fmt.Errorf("could not fetch from origin: %w", ferr)
+		}
+
+		branchOut, berr := exec.Command("git", "-C", pathDir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+		if berr != nil {
+			logf("[ERROR] Could not determine current branch: %v", berr)
+			return pathDir, fmt.Errorf("could not determine current branch: %w", berr)
+		}
+		branch := strings.TrimSpace(string(branchOut))
+
+		reset := exec.Command("git", "-C", pathDir, "reset", "--hard", "origin/"+branch)
+		if out, rerr := reset.CombinedOutput(); rerr != nil {
+			logf("[ERROR] Could not reset to origin/%s: %v: %s", branch, rerr, strings.TrimSpace(string(out)))
+			return pathDir, fmt.Errorf("could not reset to origin/%s: %w", branch, rerr)
+		}
+		logf("Synced to origin/%s", branch)
+		return pathDir, nil
 	}
 
 	logf("Cloning %s into %s", repoUrl, pathDir)

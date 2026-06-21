@@ -14,47 +14,6 @@ import (
 	"github.com/pthsarmah/forge-agent/utils"
 )
 
-type Tailnet struct {
-	Name            string `json:"Name"`
-	MagicDNSSuffix  string `json:"MagicDNSSuffix"`
-	MagicDNSEnabled bool   `json:"MagicDNSEnabled"`
-}
-
-type TailscaleStatus struct {
-	BackendState   string  `json:"BackendState"`
-	CurrentTailnet Tailnet `json:"CurrentTailnet"`
-}
-
-func SetupTailscaleAuth(authKey string, magicDnsSuffix string) error {
-	logger, _ := utils.GetLoggerInstance()
-	cmd := exec.Command("tailscale", "status", "--json")
-
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("Could not run tailscale status: %v", err)
-	}
-
-	var status TailscaleStatus
-
-	if err = json.Unmarshal(output, &status); err != nil {
-		return fmt.Errorf("Could not unmarshal tailscale status output: %v", err)
-	}
-
-	if status.BackendState == "Running" &&
-		status.CurrentTailnet.MagicDNSSuffix == magicDnsSuffix {
-		logger.SystemLogger.Printf("Tailscale for magic dns %v already running", magicDnsSuffix)
-		return nil
-	}
-
-	cmd = exec.Command("tailscale", "up", "--auth-key="+authKey)
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("Could not run tailscale up: %v", err)
-	}
-
-	return nil
-}
-
 func SetupCloudflared(tunnelToken string) error {
 	logger, _ := utils.GetLoggerInstance()
 

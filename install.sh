@@ -3,9 +3,9 @@
 # forge-agent installer
 #
 # Installs the forge-agent VPS agent and its prerequisites (docker, nixpacks,
-# tailscale, cloudflared; the run user gets passwordless sudo for tailscale),
-# fetches the prebuilt binary from the git repository, installs it onto PATH,
-# seeds configuration, and spins up a Grafana Alloy container for log shipping.
+# cloudflared), fetches the prebuilt binary from the git repository, installs it
+# onto PATH, seeds configuration, and spins up a Grafana Alloy container for log
+# shipping.
 #
 # Usage:
 #   sudo ./install.sh [options]
@@ -218,67 +218,6 @@ ensure_nixpacks() {
   fi
   have nixpacks || err "nixpacks still not on PATH after install"
   log "nixpacks installed: $(nixpacks --version)"
-}
-
-ensure_tailscale() {
-  if have tailscale; then
-    log "tailscale present: $(tailscale version 2>/dev/null | head -1 || echo unknown)"
-  else
-    log "tailscale not found; installing via official script"
-    curl -fsSL https://tailscale.com/install.sh | sh || err "tailscale installation failed"
-    have tailscale || err "tailscale still not on PATH after install"
-    log "tailscale installed: $(tailscale version 2>/dev/null | head -1)"
-  fi
-  grant_tailscale_sudo
-  set_tailscale_operator
-}
-
-# Drop the need to type `sudo` at all: setting the tailscale operator to the
-# run user lets that user run `tailscale up` / `tailscale set` directly.
-# Requires tailscaled to be running; the official installer enables it.
-set_tailscale_operator() {
-  [[ "$RUN_USER" == "root" ]] && return
-
-  # tailscaled may need a moment after install to come up.
-  local i
-  for i in 1 2 3 4 5; do
-    tailscale version >/dev/null 2>&1 && break
-    sleep 1
-  done
-
-  if tailscale set --operator="$RUN_USER" 2>/dev/null; then
-    log "tailscale operator set to '$RUN_USER' (no sudo needed for tailscale)"
-  else
-    warn "could not set tailscale operator now (daemon not ready / not logged in)"
-    warn "run once after first 'tailscale up': sudo tailscale set --operator=$RUN_USER"
-  fi
-}
-
-# Let the run user drive tailscale without typing a sudo password.
-# `tailscale up` etc. require root; a NOPASSWD sudoers rule scoped to the
-# tailscale binary means `sudo tailscale ...` runs without a prompt.
-grant_tailscale_sudo() {
-  [[ "$RUN_USER" == "root" ]] && { log "run user is root; no sudoers rule needed"; return; }
-
-  local ts_bin
-  ts_bin="$(command -v tailscale || echo /usr/bin/tailscale)"
-
-  local sudoers="/etc/sudoers.d/forge-agent-tailscale"
-  local tmp
-  tmp="$(mktemp)"
-  cat > "$tmp" <<EOF
-# Managed by forge-agent install.sh — passwordless tailscale for the agent user
-$RUN_USER ALL=(root) NOPASSWD: $ts_bin, $ts_bin *
-EOF
-
-  if visudo -cf "$tmp" >/dev/null 2>&1; then
-    install -m 0440 "$tmp" "$sudoers"
-    rm -f "$tmp"
-    log "passwordless sudo for tailscale granted to '$RUN_USER' -> $sudoers"
-  else
-    rm -f "$tmp"
-    err "generated sudoers rule failed validation; not installing it"
-  fi
 }
 
 # cloudflared: the per-node tunnel client. Installed as a static host binary
@@ -708,7 +647,6 @@ main() {
   ensure_docker
   ensure_docker_network
   ensure_nixpacks
-  ensure_tailscale
   ensure_cloudflared
   install_binary
   write_config
