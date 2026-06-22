@@ -1,7 +1,7 @@
 # forge-agent
 
-The agent that runs on each VPS connected to forge.sh. It registers the
-machine with forge, then runs as a background service that builds and deploys
+The agent that runs on each VPS connected to Forge. It registers the
+machine with Forge, then runs as a background service that builds and deploys
 your apps, ships logs and metrics, and keeps your machine reachable from the
 internet.
 
