@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pthsarmah/forge-agent/internal/api"
-	ctypes "github.com/pthsarmah/forge-agent/types"
-	"github.com/pthsarmah/forge-agent/utils"
+	"github.com/pthsarmah/buildpecker-agent/internal/api"
+	ctypes "github.com/pthsarmah/buildpecker-agent/types"
+	"github.com/pthsarmah/buildpecker-agent/utils"
 )
 
 func Start(ctx context.Context) error {

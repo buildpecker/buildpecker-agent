@@ -10,8 +10,8 @@ import (
 	"strings"
 	"syscall"
 
-	ctypes "github.com/pthsarmah/forge-agent/types"
-	"github.com/pthsarmah/forge-agent/utils"
+	ctypes "github.com/pthsarmah/buildpecker-agent/types"
+	"github.com/pthsarmah/buildpecker-agent/utils"
 )
 
 func SetupCloudflared(tunnelToken string) error {
@@ -31,12 +31,12 @@ func SetupCloudflared(tunnelToken string) error {
 		return fmt.Errorf("could not resolve home directory: %v", err)
 	}
 
-	forgeDir := filepath.Join(homeDir, ".forge")
-	if err := os.MkdirAll(forgeDir, 0755); err != nil {
-		return fmt.Errorf("could not create %s: %v", forgeDir, err)
+	buildpeckerDir := filepath.Join(homeDir, ".buildpecker")
+	if err := os.MkdirAll(buildpeckerDir, 0755); err != nil {
+		return fmt.Errorf("could not create %s: %v", buildpeckerDir, err)
 	}
 
-	tokenPath := filepath.Join(forgeDir, "cloudflared.token")
+	tokenPath := filepath.Join(buildpeckerDir, "cloudflared.token")
 	prev, _ := os.ReadFile(tokenPath)
 	running := false
 	if out, err := exec.Command("pgrep", "-f", "cloudflared tunnel.*run").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
@@ -60,7 +60,7 @@ func SetupCloudflared(tunnelToken string) error {
 		logger.SystemLogger.Println("stopped stale cloudflared (tunnel token changed)")
 	}
 
-	logFile, err := os.OpenFile(filepath.Join(forgeDir, "cloudflared.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile(filepath.Join(buildpeckerDir, "cloudflared.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("could not open cloudflared log: %v", err)
 	}
@@ -92,7 +92,7 @@ func GetAllNodes() (map[string]ctypes.NodeInfo, error) {
 		return nil, fmt.Errorf("Error in reading home director: %v", err)
 	}
 
-	configPath := filepath.Join(homeDir, ".forge/config.json")
+	configPath := filepath.Join(homeDir, ".buildpecker/config.json")
 	body, err := os.ReadFile(configPath)
 	if err != nil {
 		logger.SystemLogger.Printf("Read config %s failed: %v", configPath, err)
@@ -122,7 +122,7 @@ func IsNodeAlreadyConnectedToUser(userId string) (string, error) {
 		return "", fmt.Errorf("Error in reading home directory: %v", err)
 	}
 
-	configPath := filepath.Join(homeDir, ".forge/config.json")
+	configPath := filepath.Join(homeDir, ".buildpecker/config.json")
 	body, err := os.ReadFile(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -157,7 +157,7 @@ func SaveNodeInfo(nodeToken string, userId string, nodeId string) error {
 		return fmt.Errorf("[SaveNodeInfo] Could not load home directory: %v", err)
 	}
 
-	configDir := filepath.Join(homeDir, ".forge")
+	configDir := filepath.Join(homeDir, ".buildpecker")
 
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("[SaveNodeInfo] Could not create config directory: %v", err)

@@ -1,4 +1,4 @@
-module github.com/pthsarmah/forge-agent
+module github.com/pthsarmah/buildpecker-agent
 
 go 1.26.2
 

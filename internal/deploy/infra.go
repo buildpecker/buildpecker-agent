@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	ctypes "github.com/pthsarmah/forge-agent/types"
-	"github.com/pthsarmah/forge-agent/utils"
+	ctypes "github.com/pthsarmah/buildpecker-agent/types"
+	"github.com/pthsarmah/buildpecker-agent/utils"
 	"gopkg.in/yaml.v3"
 )
 
@@ -74,7 +74,7 @@ func transformCompose(composeYaml, envFilePath string) (string, error) {
 }
 
 func writeComposeProject(dep ctypes.Deployment, envs []ctypes.EnvVar) (string, error) {
-	dir, err := os.MkdirTemp("", "forge-infra-*")
+	dir, err := os.MkdirTemp("", "buildpecker-infra-*")
 	if err != nil {
 		return "", err
 	}

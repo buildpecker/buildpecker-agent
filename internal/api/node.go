@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pthsarmah/forge-agent/internal/system"
-	ctypes "github.com/pthsarmah/forge-agent/types"
-	"github.com/pthsarmah/forge-agent/utils"
+	"github.com/pthsarmah/buildpecker-agent/internal/system"
+	ctypes "github.com/pthsarmah/buildpecker-agent/types"
+	"github.com/pthsarmah/buildpecker-agent/utils"
 )
 
 func SendHeartbeat(ctx context.Context) error {

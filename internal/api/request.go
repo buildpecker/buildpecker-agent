@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	ctypes "github.com/pthsarmah/forge-agent/types"
+	ctypes "github.com/pthsarmah/buildpecker-agent/types"
 )
 
 // -1 - other failure (connection reset, transport failure)

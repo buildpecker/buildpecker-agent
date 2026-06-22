@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/pthsarmah/forge-agent/utils"
+	"github.com/pthsarmah/buildpecker-agent/utils"
 )
 
 // progressLine matches transient "<phase>: NN% (x/y)" updates git prints on \r.
@@ -55,7 +55,7 @@ func CloneRepo(repoUrl string, deploymentID string) (string, error) {
 		logf("Clone failed: could not fetch homedir: %v", err)
 		return "", fmt.Errorf("Failed to fetch homedir %v", err)
 	}
-	projectDir := dir + "/forge"
+	projectDir := dir + "/buildpecker"
 	if err = os.MkdirAll(projectDir, 0755); err != nil {
 		logf("Clone failed: could not create directory: %v", err)
 		return "", fmt.Errorf("Failed to create directory %v", err)

@@ -3,8 +3,8 @@ package api
 import (
 	"net/http"
 
-	ctypes "github.com/pthsarmah/forge-agent/types"
-	"github.com/pthsarmah/forge-agent/utils"
+	ctypes "github.com/pthsarmah/buildpecker-agent/types"
+	"github.com/pthsarmah/buildpecker-agent/utils"
 )
 
 func GetEnvironmentSecrets(dep ctypes.Deployment) ([]ctypes.EnvVar, error) {

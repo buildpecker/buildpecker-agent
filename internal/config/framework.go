@@ -2,7 +2,7 @@ package config
 
 import (
 	_ "embed"
-	ctypes "github.com/pthsarmah/forge-agent/types"
+	ctypes "github.com/pthsarmah/buildpecker-agent/types"
 )
 
 const (

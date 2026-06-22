@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# forge-agent installer
+# buildpecker-agent installer
 #
-# Installs the forge-agent VPS agent and its prerequisites (docker, nixpacks,
+# Installs the buildpecker-agent VPS agent and its prerequisites (docker, nixpacks,
 # cloudflared), fetches the prebuilt binary from the git repository, installs it
 # onto PATH, seeds configuration, and spins up a Grafana Alloy container for log
 # shipping.
@@ -12,7 +12,7 @@
 #
 # Options:
 #   -r, --repo URL        Git repo to fetch the binary from
-#                         (default: https://github.com/forge-paas/forge-agent.git)
+#                         (default: https://github.com/buildpecker-paas/buildpecker-agent.git)
 #   -b, --branch NAME     Branch to checkout (default: main)
 #   -p, --prefix DIR      Install dir for the binary (default: /usr/local/bin)
 #       --convex-url URL  CONVEX_CLOUD_URL value (default: http://localhost:3210)
@@ -27,7 +27,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-REPO_URL="https://github.com/forge-paas/forge-agent.git"
+REPO_URL="https://github.com/buildpecker-paas/buildpecker-agent.git"
 BRANCH="main"
 PREFIX="/usr/local/bin"
 CONVEX_CLOUD_URL="https://convex-cloud.parthajeet.xyz"
@@ -37,15 +37,15 @@ LOKI_URL="https://loki.parthajeet.xyz"
 INSTALL_ALLOY=1
 
 ALLOY_CONTAINER="alloy"
-DOCKER_NETWORK="forge"
+DOCKER_NETWORK="buildpecker"
 
-BIN_NAME="forge-agent"
-CONFIG_DIR="/etc/forge-agent"
+BIN_NAME="buildpecker-agent"
+CONFIG_DIR="/etc/buildpecker-agent"
 
-# The human who ran `sudo ./install.sh`. `forge-agent register` writes the
-# node config to that user's ~/.forge/config.json, and the daemon reads it
+# The human who ran `sudo ./install.sh`. `buildpecker-agent register` writes the
+# node config to that user's ~/.buildpecker/config.json, and the daemon reads it
 # back via os.UserHomeDir(). Register AND run the daemon as this same user,
-# else it looks in /root/.forge, finds nothing, and fails.
+# else it looks in /root/.buildpecker, finds nothing, and fails.
 RUN_USER="${SUDO_USER:-root}"
 
 TMP_DIR=""
@@ -192,7 +192,7 @@ ensure_docker() {
   log "docker installed: $(docker --version)"
 }
 
-# The shared docker network every forge container (Alloy, future app
+# The shared docker network every buildpecker container (Alloy, future app
 # containers) attaches to. Created once, up-front, so later steps can assume it.
 ensure_docker_network() {
   have docker || return 0
@@ -280,7 +280,7 @@ install_binary() {
   install -m 0755 "$src" "$PREFIX/$BIN_NAME.bin"
 
   # Wrapper: the binary loads .env from the current working directory, so a
-  # bare `forge-agent register ...` run from $HOME sees no config. The wrapper
+  # bare `buildpecker-agent register ...` run from $HOME sees no config. The wrapper
   # sources the global config into the environment before exec'ing the real
   # binary, making it work from any cwd.
   cat > "$PREFIX/$BIN_NAME" <<EOF
@@ -338,15 +338,15 @@ write_alloy_config() {
   local dir
   dir="$(dirname "$cfg")"
   # Create the full path recursively (mkdir -p semantics) so a fresh host with
-  # no ~/.forge tree doesn't error on the `cat >` / docker bind-mount.
+  # no ~/.buildpecker tree doesn't error on the `cat >` / docker bind-mount.
   mkdir -p "$dir" || err "could not create alloy config dir: $dir"
   [[ -d "$dir" ]] || err "alloy config dir missing after create: $dir"
   # Quoted heredoc: the config contains backticks/`${}`/`sys.env(...)` that must
   # be written literally. The Loki push URL is templated via a placeholder and
   # substituted afterwards so --loki-url stays configurable.
   cat > "$cfg" <<'ALLOY_EOF'
-// ~/.forge/grafana/alloy/config.alloy
-// Run: alloy run ~/.forge/grafana/alloy/config.alloy --storage.path=/tmp/alloy
+// ~/.buildpecker/grafana/alloy/config.alloy
+// Run: alloy run ~/.buildpecker/grafana/alloy/config.alloy --storage.path=/tmp/alloy
 
 logging {
   level  = "info"
@@ -355,37 +355,37 @@ logging {
 
 /* ---------- file discovery ---------- */
 
-local.file_match "forge_api" {
+local.file_match "buildpecker_api" {
   path_targets = [{
-    __path__ = "/var/log/forge/api.log",
-    job      = "forge-agent",
+    __path__ = "/var/log/buildpecker/api.log",
+    job      = "buildpecker-agent",
     service  = "api",
     host     = constants.hostname,
   }]
 }
 
-local.file_match "forge_system" {
+local.file_match "buildpecker_system" {
   path_targets = [{
-    __path__ = "/var/log/forge/system.log",
-    job      = "forge-agent",
+    __path__ = "/var/log/buildpecker/system.log",
+    job      = "buildpecker-agent",
     service  = "system",
     host     = constants.hostname,
   }]
 }
 
-local.file_match "forge_deploy" {
+local.file_match "buildpecker_deploy" {
   path_targets = [{
-    __path__ = "/var/log/forge/deploy.log",
-    job      = "forge-agent",
+    __path__ = "/var/log/buildpecker/deploy.log",
+    job      = "buildpecker-agent",
     service  = "deploy",
     host     = constants.hostname,
   }]
 }
 
-local.file_match "forge_deployments" {
+local.file_match "buildpecker_deployments" {
   path_targets = [{
-    __path__ = "/var/log/forge/deployments/*.log",
-    job      = "forge-agent",
+    __path__ = "/var/log/buildpecker/deployments/*.log",
+    job      = "buildpecker-agent",
     service  = "deployment",
     host     = constants.hostname,
   }]
@@ -393,30 +393,30 @@ local.file_match "forge_deployments" {
 
 /* ---------- tail ---------- */
 
-loki.source.file "forge_api" {
-  targets    = local.file_match.forge_api.targets
-  forward_to = [loki.process.forge_std.receiver]
+loki.source.file "buildpecker_api" {
+  targets    = local.file_match.buildpecker_api.targets
+  forward_to = [loki.process.buildpecker_std.receiver]
 }
 
-loki.source.file "forge_system" {
-  targets    = local.file_match.forge_system.targets
-  forward_to = [loki.process.forge_std.receiver]
+loki.source.file "buildpecker_system" {
+  targets    = local.file_match.buildpecker_system.targets
+  forward_to = [loki.process.buildpecker_std.receiver]
 }
 
-loki.source.file "forge_deploy" {
-  targets    = local.file_match.forge_deploy.targets
-  forward_to = [loki.process.forge_std.receiver]
+loki.source.file "buildpecker_deploy" {
+  targets    = local.file_match.buildpecker_deploy.targets
+  forward_to = [loki.process.buildpecker_std.receiver]
 }
 
-loki.source.file "forge_deployments" {
-  targets    = local.file_match.forge_deployments.targets
-  forward_to = [loki.process.forge_deployment.receiver]
+loki.source.file "buildpecker_deployments" {
+  targets    = local.file_match.buildpecker_deployments.targets
+  forward_to = [loki.process.buildpecker_deployment.receiver]
 }
 
 /* ---------- parse: api / system / deploy ----------
    line shape: "[API] 2026/05/14 12:34:56.123456 message..." (UTC)
 */
-loki.process "forge_std" {
+loki.process "buildpecker_std" {
   forward_to = [loki.write.default.receiver]
 
   stage.regex {
@@ -459,7 +459,7 @@ loki.process "forge_std" {
    NB: deployment_id is high cardinality — kept in structured_metadata,
    not as a label, to avoid blowing up the index.
 */
-loki.process "forge_deployment" {
+loki.process "buildpecker_deployment" {
   forward_to = [loki.write.default.receiver]
 
   stage.regex {
@@ -520,20 +520,20 @@ ensure_alloy() {
 
   local home cfg log_dir
   home="$(run_user_home)"
-  cfg="$home/.forge/grafana/alloy/config.alloy"
+  cfg="$home/.buildpecker/grafana/alloy/config.alloy"
   write_alloy_config "$cfg"
 
-  # The agent writes logs to ~/.forge/logs (utils.GetLoggerInstance), but the
-  # Alloy config tails /var/log/forge/*. Bind-mount the real log dir to that
+  # The agent writes logs to ~/.buildpecker/logs (utils.GetLoggerInstance), but the
+  # Alloy config tails /var/log/buildpecker/*. Bind-mount the real log dir to that
   # path so Alloy actually sees the files. Created up-front in case the agent
   # hasn't started yet (empty dir is fine; loki.source.file picks files up).
-  log_dir="$home/.forge/logs"
+  log_dir="$home/.buildpecker/logs"
   mkdir -p "$log_dir/deployments"
   chown -R "$RUN_USER": "$log_dir" 2>/dev/null || true
 
   # Persist Alloy's read-position store so recreating the container resumes
   # instead of re-reading every file from the start (which resends logs).
-  local data_dir="$home/.forge/grafana/alloy/data"
+  local data_dir="$home/.buildpecker/grafana/alloy/data"
   mkdir -p "$data_dir"
   chown -R "$RUN_USER": "$data_dir" 2>/dev/null || true
 
@@ -541,7 +541,7 @@ ensure_alloy() {
   # `constants.hostname`; left unset, Docker assigns a fresh random hostname
   # per `docker run`, so every recreate becomes a NEW Loki stream and the
   # resent lines can't be deduplicated (you get N copies after N reinstalls).
-  local host_name; host_name="$(hostname 2>/dev/null || echo forge-node)"
+  local host_name; host_name="$(hostname 2>/dev/null || echo buildpecker-node)"
 
   # Recreate the container so it picks up the (possibly new) config.
   if docker ps -a --format '{{.Names}}' | grep -qx "$ALLOY_CONTAINER"; then
@@ -551,7 +551,7 @@ ensure_alloy() {
   docker run \
     -d \
     -v "$cfg":/etc/alloy/config.alloy \
-    -v "$log_dir":/var/log/forge:ro \
+    -v "$log_dir":/var/log/buildpecker:ro \
     -v "$data_dir":/var/lib/alloy/data \
     --hostname "$host_name" \
     -p 127.0.0.1:12345:12345 --name "$ALLOY_CONTAINER" --network "$DOCKER_NETWORK" \
@@ -572,7 +572,7 @@ ensure_alloy() {
 # service has no login env. The watchdog runs the daemon through a LOGIN
 # shell (`bash -lc`), i.e. the exact environment where it works today.
 # ---------------------------------------------------------------------------
-CRON_MARKER="# forge-agent daemon (managed by install.sh)"
+CRON_MARKER="# buildpecker-agent daemon (managed by install.sh)"
 
 # A daemon started by a previous install keeps running the OLD binary even
 # after the file is replaced (Linux holds the deleted inode). The per-minute
@@ -593,10 +593,10 @@ install_supervisor_cron() {
 
   local home log_file start_cmd reboot_line watch_line existing
   home="$(run_user_home)"
-  log_file="$home/.forge/daemon.log"
+  log_file="$home/.buildpecker/daemon.log"
 
   # Same invocation as a working manual run: login shell so HOME/PATH/env
-  # match, wrapper sources /etc/forge-agent/.env, nohup detaches from cron.
+  # match, wrapper sources /etc/buildpecker-agent/.env, nohup detaches from cron.
   start_cmd="nohup \"$PREFIX/$BIN_NAME\" daemon >> \"$log_file\" 2>&1 &"
   reboot_line="@reboot /bin/bash -lc '$start_cmd'  $CRON_MARKER"
   # Every minute: relaunch only if no daemon is running (matches the real
@@ -607,27 +607,27 @@ install_supervisor_cron() {
   watch_line="* * * * * /bin/bash -lc 'pgrep -f \"[${BIN_NAME:0:1}]${BIN_NAME:1}.bin daemon\" >/dev/null 2>&1 || { $start_cmd }'  $CRON_MARKER"
 
   # cloudflared tunnel supervision. The token is written by the agent
-  # (system.SetupCloudflared) to ~/.forge/cloudflared.token (0600) at
+  # (system.SetupCloudflared) to ~/.buildpecker/cloudflared.token (0600) at
   # registration; until then both lines are a no-op (token file absent),
   # mirroring the daemon's "harmless until you register" behaviour. Bracketed
   # pgrep so the watchdog's own cmdline doesn't self-match.
   local cf_bin cf_token cf_log cf_start
   cf_bin="$PREFIX/cloudflared"
-  cf_token="$home/.forge/cloudflared.token"
-  cf_log="$home/.forge/cloudflared.log"
+  cf_token="$home/.buildpecker/cloudflared.token"
+  cf_log="$home/.buildpecker/cloudflared.log"
   cf_start="nohup \"$cf_bin\" tunnel --no-autoupdate run --token \"\$(cat $cf_token)\" >> \"$cf_log\" 2>&1 &"
   cf_reboot_line="@reboot /bin/bash -lc 'test -s $cf_token && { $cf_start }'  $CRON_MARKER"
   cf_watch_line="* * * * * /bin/bash -lc 'test -s $cf_token && { pgrep -f \"[c]loudflared tunnel\" >/dev/null 2>&1 || { $cf_start }; }'  $CRON_MARKER"
 
   existing="$(crontab -u "$RUN_USER" -l 2>/dev/null || true)"
-  # Drop ALL prior forge-agent cron lines so reinstall never duplicates.
+  # Drop ALL prior buildpecker-agent cron lines so reinstall never duplicates.
   # Match two independent tokens: the current marker AND the log-redirect
-  # path that every version we've ever shipped writes (`.forge/daemon.log`).
+  # path that every version we've ever shipped writes (`.buildpecker/daemon.log`).
   # The marker text changed across builds; the log path never did, so an
   # old line with a different/missing marker is still stripped here.
   existing="$(printf '%s\n' "$existing" \
     | grep -vF "$CRON_MARKER" \
-    | grep -vF '/.forge/daemon.log' \
+    | grep -vF '/.buildpecker/daemon.log' \
     || true)"
 
   printf '%s\n%s\n%s\n%s\n%s\n' "$existing" "$reboot_line" "$watch_line" "$cf_reboot_line" "$cf_watch_line" \
@@ -661,19 +661,19 @@ main() {
   echo "  binary : $PREFIX/$BIN_NAME"
   echo "  config : $CONFIG_DIR/.env"
   if [[ $INSTALL_ALLOY -eq 1 ]]; then
-    echo "  alloy  : $home/.forge/grafana/alloy/config.alloy (container '$ALLOY_CONTAINER', :12345)"
+    echo "  alloy  : $home/.buildpecker/grafana/alloy/config.alloy (container '$ALLOY_CONTAINER', :12345)"
   fi
   echo
   echo "  Next steps (run as user '$RUN_USER' — NOT via sudo; the daemon reads"
-  echo "  its node config from ~/.forge, so it must be the same user):"
+  echo "  its node config from ~/.buildpecker, so it must be the same user):"
   echo "   1. register : $BIN_NAME register <TOKEN>"
-  echo "   2. start    : nohup $BIN_NAME daemon >> $home/.forge/daemon.log 2>&1 &"
+  echo "   2. start    : nohup $BIN_NAME daemon >> $home/.buildpecker/daemon.log 2>&1 &"
   echo "                 (or just wait <=60s for the watchdog to start it)"
   echo
   echo "  Supervision (no systemd) via crontab for '$RUN_USER':"
   echo "   - @reboot      : starts the daemon on boot"
   echo "   - per-minute   : relaunches it if not running (crash recovery)"
-  echo "   - logs         : $home/.forge/daemon.log"
+  echo "   - logs         : $home/.buildpecker/daemon.log"
   echo "  Both run through a login shell, matching a working manual run."
   echo "  Harmless no-op until you register (daemon exits without node config)."
 }

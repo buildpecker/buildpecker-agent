@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# forge-agent uninstaller
+# buildpecker-agent uninstaller
 #
-# Stops the running forge-agent daemon and removes the binary, wrapper, config,
+# Stops the running buildpecker-agent daemon and removes the binary, wrapper, config,
 # the Grafana Alloy container/config, and the cloudflared binary + tunnel token
 # (the running tunnel IS stopped — it exposes the node). Prerequisites (docker,
 # nixpacks) are left installed.
@@ -12,7 +12,7 @@
 #
 # Options:
 #   -p, --prefix DIR   Dir the binary was installed to (default: /usr/local/bin)
-#       --keep-config  Keep /etc/forge-agent (config) instead of removing it
+#       --keep-config  Keep /etc/buildpecker-agent (config) instead of removing it
 #       --keep-alloy   Keep the Grafana Alloy container and its config
 #       --keep-traefik Keep the Traefik container and its ACME store
 #       --keep-cloudflared Keep the cloudflared binary, token, and running tunnel
@@ -28,8 +28,8 @@ KEEP_TRAEFIK=0
 KEEP_CLOUDFLARED=0
 ASSUME_YES=0
 
-BIN_NAME="forge-agent"
-CONFIG_DIR="/etc/forge-agent"
+BIN_NAME="buildpecker-agent"
+CONFIG_DIR="/etc/buildpecker-agent"
 ALLOY_CONTAINER="alloy"
 TRAEFIK_CONTAINER="traefik"
 
@@ -48,12 +48,12 @@ run_user_home() {
   [[ -z "$h" ]] && h="$([[ "$u" == "root" ]] && echo /root || echo "/home/$u")"
   printf '%s' "$h"
 }
-ALLOY_CONFIG_DIR="$(run_user_home)/.forge/grafana/alloy"
-TRAEFIK_CONFIG_DIR="$(run_user_home)/.forge/traefik"
-CLOUDFLARED_TOKEN="$(run_user_home)/.forge/cloudflared.token"
-CLOUDFLARED_LOG="$(run_user_home)/.forge/cloudflared.log"
+ALLOY_CONFIG_DIR="$(run_user_home)/.buildpecker/grafana/alloy"
+TRAEFIK_CONFIG_DIR="$(run_user_home)/.buildpecker/traefik"
+CLOUDFLARED_TOKEN="$(run_user_home)/.buildpecker/cloudflared.token"
+CLOUDFLARED_LOG="$(run_user_home)/.buildpecker/cloudflared.log"
 RUN_USER="${SUDO_USER:-root}"
-CRON_MARKER="# forge-agent daemon (managed by install.sh)"
+CRON_MARKER="# buildpecker-agent daemon (managed by install.sh)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

@@ -2,8 +2,8 @@ package main
 
 import (
 	"github.com/joho/godotenv"
-	"github.com/pthsarmah/forge-agent/cmd"
-	"github.com/pthsarmah/forge-agent/utils"
+	"github.com/pthsarmah/buildpecker-agent/cmd"
+	"github.com/pthsarmah/buildpecker-agent/utils"
 )
 
 func main() {

@@ -6,11 +6,11 @@ import (
 	"path"
 	"strings"
 
-	"github.com/pthsarmah/forge-agent/internal/api"
-	//	"github.com/pthsarmah/forge-agent/internal/docker"
-	"github.com/pthsarmah/forge-agent/internal/git"
-	ctypes "github.com/pthsarmah/forge-agent/types"
-	"github.com/pthsarmah/forge-agent/utils"
+	"github.com/pthsarmah/buildpecker-agent/internal/api"
+	//	"github.com/pthsarmah/buildpecker-agent/internal/docker"
+	"github.com/pthsarmah/buildpecker-agent/internal/git"
+	ctypes "github.com/pthsarmah/buildpecker-agent/types"
+	"github.com/pthsarmah/buildpecker-agent/utils"
 )
 
 func deriveImageName(repoUrl string) string {

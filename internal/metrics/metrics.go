@@ -12,8 +12,8 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 
-	"github.com/pthsarmah/forge-agent/internal/system"
-	"github.com/pthsarmah/forge-agent/utils"
+	"github.com/pthsarmah/buildpecker-agent/internal/system"
+	"github.com/pthsarmah/buildpecker-agent/utils"
 )
 
 // defaultEndpoint is the OTel Collector OTLP/HTTP receiver in the central
@@ -57,7 +57,7 @@ func Start(ctx context.Context, endpoint string, interval time.Duration) (func(c
 
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
-			attribute.String("service.name", "forge-agent"),
+			attribute.String("service.name", "buildpecker-agent"),
 			attribute.String("host.name", system.GetHostname()),
 		),
 	)
@@ -72,7 +72,7 @@ func Start(ctx context.Context, endpoint string, interval time.Duration) (func(c
 	)
 	otel.SetMeterProvider(mp)
 
-	if err := registerInstruments(mp.Meter("forge-agent")); err != nil {
+	if err := registerInstruments(mp.Meter("buildpecker-agent")); err != nil {
 		_ = mp.Shutdown(ctx)
 		return nil, err
 	}
