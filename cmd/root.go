@@ -8,8 +8,8 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "forge-agent",
-	Short: "VPS Agent for forge.sh",
+	Use:   "buildpecker-agent",
+	Short: "VPS Agent for buildpecker.sh",
 	Args:  cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 

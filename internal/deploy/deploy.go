@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	ctypes "github.com/pthsarmah/forge-agent/types"
-	"github.com/pthsarmah/forge-agent/utils"
+	ctypes "github.com/pthsarmah/buildpecker-agent/types"
+	"github.com/pthsarmah/buildpecker-agent/utils"
 	"log"
 	"net"
 	"os"
@@ -237,7 +237,7 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		"--name", imageName,
 		"--restart", "unless-stopped",
 		"--health-cmd", fmt.Sprintf("wget --no-verbose --tries=1 --spider '%s' || exit 1", healthURL),
-		"--network", "forge",
+		"--network", "buildpecker",
 		"--health-interval", "30s",
 		"--health-timeout", "5s",
 		"--health-retries", "3",

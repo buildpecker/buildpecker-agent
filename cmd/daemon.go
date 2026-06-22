@@ -9,20 +9,20 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pthsarmah/forge-agent/internal/api"
-	"github.com/pthsarmah/forge-agent/internal/deploy"
-	"github.com/pthsarmah/forge-agent/internal/metrics"
+	"github.com/pthsarmah/buildpecker-agent/internal/api"
+	"github.com/pthsarmah/buildpecker-agent/internal/deploy"
+	"github.com/pthsarmah/buildpecker-agent/internal/metrics"
 	"github.com/spf13/cobra"
 )
 
 var daemonCmd = &cobra.Command{
 	Use:   "daemon",
-	Short: "Run forge-agent as a long-running service",
+	Short: "Run buildpecker-agent as a long-running service",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
-		fmt.Println("forge-agent daemon started")
+		fmt.Println("buildpecker-agent daemon started")
 
 		shutdownMetrics, err := metrics.Start(ctx, "", time.Second)
 		if err != nil {
@@ -45,7 +45,7 @@ var daemonCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "daemon exited: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Println("forge-agent daemon stopped")
+		fmt.Println("buildpecker-agent daemon stopped")
 	},
 }
 

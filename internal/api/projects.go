@@ -1,8 +1,8 @@
 package api
 
 import (
-	ctypes "github.com/pthsarmah/forge-agent/types"
-	"github.com/pthsarmah/forge-agent/utils"
+	ctypes "github.com/pthsarmah/buildpecker-agent/types"
+	"github.com/pthsarmah/buildpecker-agent/utils"
 	"net/http"
 )
 

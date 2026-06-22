@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/pthsarmah/forge-agent/internal/system"
-	ctypes "github.com/pthsarmah/forge-agent/types"
-	"github.com/pthsarmah/forge-agent/utils"
+	"github.com/pthsarmah/buildpecker-agent/internal/system"
+	ctypes "github.com/pthsarmah/buildpecker-agent/types"
+	"github.com/pthsarmah/buildpecker-agent/utils"
 )
 
 func GetQueuedPostInstalls() ([]ctypes.PostInstallRun, error) {

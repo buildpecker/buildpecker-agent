@@ -61,7 +61,7 @@ func GetLoggerInstance() (*Logger, error) {
 			return
 		}
 
-		baseDir := filepath.Join(home, ".forge", "logs")
+		baseDir := filepath.Join(home, ".buildpecker", "logs")
 
 		if err := os.MkdirAll(baseDir, 0o755); err != nil {
 			initErr = err
