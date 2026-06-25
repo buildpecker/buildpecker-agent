@@ -32,10 +32,12 @@ type InfraTemplate struct {
 }
 
 type Infra struct {
-	Id            string        `json:"_id"`
-	ContainerName string        `json:"containerName"`
-	ComposeYaml   string        `json:"composeYaml"`
-	Template      InfraTemplate `json:"template"`
+	Id             string        `json:"_id"`
+	ContainerName  string        `json:"containerName"`
+	ComposeYaml    string        `json:"composeYaml"`
+	ConfigFileName string        `json:"configFileName,omitempty"`
+	Config         string        `json:"config,omitempty"`
+	Template       InfraTemplate `json:"template"`
 }
 
 type InfraRoute struct {

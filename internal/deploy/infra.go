@@ -73,6 +73,15 @@ func transformCompose(composeYaml, envFilePath string) (string, error) {
 	return string(out), nil
 }
 
+func writeServiceConfig(dir string, fileName string, fileContents string) error {
+	serviceConfig := filepath.Join(dir, fileName)
+	if err := os.WriteFile(serviceConfig, []byte(fileContents), 0600); err != nil {
+		os.RemoveAll(dir)
+		return err
+	}
+	return nil
+}
+
 func writeComposeProject(dep ctypes.Deployment, envs []ctypes.EnvVar) (string, error) {
 	dir, err := os.MkdirTemp("", "buildpecker-infra-*")
 	if err != nil {
@@ -100,6 +109,12 @@ func writeComposeProject(dep ctypes.Deployment, envs []ctypes.EnvVar) (string, e
 	if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte(compose), 0644); err != nil {
 		os.RemoveAll(dir)
 		return "", err
+	}
+
+	if dep.Infra.Config != "" {
+		if err := writeServiceConfig(dir, dep.Infra.ConfigFileName, dep.Infra.Config); err != nil {
+			return "", err
+		}
 	}
 
 	return dir, nil
