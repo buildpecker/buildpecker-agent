@@ -27,7 +27,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-REPO_URL="https://github.com/buildpecker-paas/buildpecker-agent.git"
+REPO_URL="https://github.com/buildpecker/buildpecker-agent.git"
 BRANCH="main"
 PREFIX="/usr/local/bin"
 CONVEX_CLOUD_URL="https://convex-cloud.parthajeet.xyz"
