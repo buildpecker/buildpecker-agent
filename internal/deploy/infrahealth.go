@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"os/exec"
+	"strings"
 
 	"github.com/pthsarmah/buildpecker-agent/internal/api"
 	ctypes "github.com/pthsarmah/buildpecker-agent/types"
@@ -13,11 +14,16 @@ func handleInfraHealth(target ctypes.InfraHealthTarget) {
 
 	project := composeProjectName(target.ContainerName, target.DeploymentId)
 
-	cmd := exec.Command(
-		"docker", "compose", "-p", project,
-		"exec", "-T", target.Service,
-		"sh", "-c", target.Command,
-	)
+	var cmd *exec.Cmd
+	if strings.TrimSpace(target.Service) == "" {
+		cmd = exec.Command("sh", "-c", target.Command)
+	} else {
+		cmd = exec.Command(
+			"docker", "compose", "-p", project,
+			"exec", "-T", target.Service,
+			"sh", "-c", target.Command,
+		)
+	}
 
 	if err := cmd.Run(); err != nil {
 		logger.DeployLogger.Printf("Infra health dep=%s project=%s unhealthy: %v", target.DeploymentId, project, err)
