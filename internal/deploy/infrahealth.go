@@ -2,13 +2,13 @@ package deploy
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"os/user"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
-
-	"os/user"
 
 	"github.com/pthsarmah/buildpecker-agent/internal/api"
 	ctypes "github.com/pthsarmah/buildpecker-agent/types"
@@ -44,17 +44,19 @@ func handleInfraHealth(target ctypes.InfraHealthTarget) {
 
 	var cmd *exec.Cmd
 	if strings.TrimSpace(target.Service) == "" {
-		cred, err := unprivilegedCredential()
-		if err != nil {
-			logger.DeployLogger.Printf("Infra health dep=%s skipped: no unprivileged user for host command: %v", target.DeploymentId, err)
-			if depLog != nil {
-				depLog.Printf("Health check skipped: host user 'nobody' unavailable: %v", err)
-			}
-			return
-		}
 		cmd = exec.CommandContext(ctx, "sh", "-c", target.Command)
-		cmd.Dir = "/"
-		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: cred}
+		if os.Geteuid() == 0 {
+			cred, err := unprivilegedCredential()
+			if err != nil {
+				logger.DeployLogger.Printf("Infra health dep=%s skipped: no unprivileged user for host command: %v", target.DeploymentId, err)
+				if depLog != nil {
+					depLog.Printf("Health check skipped: host user 'nobody' unavailable: %v", err)
+				}
+				return
+			}
+			cmd.Dir = "/"
+			cmd.SysProcAttr = &syscall.SysProcAttr{Credential: cred}
+		}
 	} else {
 		cmd = exec.CommandContext(
 			ctx,
