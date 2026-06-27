@@ -18,7 +18,7 @@
 #       --convex-url URL  CONVEX_CLOUD_URL value (default: http://localhost:3210)
 #       --convex-site URL CONVEX_SITE_URL value (default: http://localhost:3211)
 #       --otel-endpoint A OTEL_EXPORTER_OTLP_ENDPOINT value (default: localhost:4318)
-#       --loki-url URL    Loki base URL for Alloy (default: https://loki.parthajeet.xyz)
+#       --loki-url URL    Loki base URL for Alloy (default: https://loki.buildpecker.com)
 #       --no-alloy        Skip the Grafana Alloy container
 #   -h, --help            Show this help and exit
 
@@ -30,10 +30,10 @@ set -euo pipefail
 REPO_URL="https://github.com/buildpecker/buildpecker-agent.git"
 BRANCH="main"
 PREFIX="/usr/local/bin"
-CONVEX_CLOUD_URL="https://convex-cloud.parthajeet.xyz"
-CONVEX_SITE_URL="https://convex-site.parthajeet.xyz"
-OTEL_EXPORTER_OTLP_ENDPOINT="https://otel-collector.parthajeet.xyz"
-LOKI_URL="https://loki.parthajeet.xyz"
+CONVEX_CLOUD_URL="https://convex-cloud.buildpecker.com"
+CONVEX_SITE_URL="https://convex-site.buildpecker.com"
+OTEL_EXPORTER_OTLP_ENDPOINT="https://otel-collector.buildpecker.com"
+LOKI_URL="https://loki.buildpecker.com"
 INSTALL_ALLOY=1
 
 ALLOY_CONTAINER="alloy"
