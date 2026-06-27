@@ -75,7 +75,7 @@ func transformCompose(composeYaml, envFilePath string) (string, error) {
 
 func writeServiceConfig(dir string, fileName string, fileContents string) error {
 	serviceConfig := filepath.Join(dir, fileName)
-	if err := os.WriteFile(serviceConfig, []byte(fileContents), 0600); err != nil {
+	if err := os.WriteFile(serviceConfig, []byte(fileContents), 0644); err != nil {
 		os.RemoveAll(dir)
 		return err
 	}
