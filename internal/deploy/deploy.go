@@ -163,7 +163,7 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		nixpackEnvs["NIXPACKS_CONFIG_FILE"] = cfgPath
 	}
 
-	runtimePkgs := []string{"wget"}
+	runtimePkgs := []string{"curl"}
 	if pkgs := DetectNativePkgs(projectPath); len(pkgs) > 0 {
 		runtimePkgs = append(runtimePkgs, pkgs...)
 	}
