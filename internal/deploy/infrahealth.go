@@ -35,6 +35,7 @@ func unprivilegedCredential() (*syscall.Credential, error) {
 
 func handleInfraHealth(target ctypes.InfraHealthTarget) {
 	logger, _ := utils.GetLoggerInstance()
+	depLog, _ := logger.GetDeploymentLogger(target.DeploymentId)
 
 	project := composeProjectName(target.ContainerName, target.DeploymentId)
 
@@ -46,9 +47,13 @@ func handleInfraHealth(target ctypes.InfraHealthTarget) {
 		cred, err := unprivilegedCredential()
 		if err != nil {
 			logger.DeployLogger.Printf("Infra health dep=%s skipped: no unprivileged user for host command: %v", target.DeploymentId, err)
+			if depLog != nil {
+				depLog.Printf("Health check skipped: host user 'nobody' unavailable: %v", err)
+			}
 			return
 		}
 		cmd = exec.CommandContext(ctx, "sh", "-c", target.Command)
+		cmd.Dir = "/"
 		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: cred}
 	} else {
 		cmd = exec.CommandContext(
@@ -59,8 +64,12 @@ func handleInfraHealth(target ctypes.InfraHealthTarget) {
 		)
 	}
 
-	if err := cmd.Run(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		logger.DeployLogger.Printf("Infra health dep=%s project=%s unhealthy: %v", target.DeploymentId, project, err)
+		if depLog != nil {
+			depLog.Printf("Health check unhealthy: %v\n%s", err, strings.TrimSpace(string(out)))
+		}
 		return
 	}
 
