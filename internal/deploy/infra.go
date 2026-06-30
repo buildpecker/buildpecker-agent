@@ -111,7 +111,7 @@ func writeComposeProject(dep ctypes.Deployment, envs []ctypes.EnvVar) (string, e
 		return "", err
 	}
 
-	if dep.Infra.Config != "" {
+	if dep.Infra.ConfigFileName != "" {
 		if err := writeServiceConfig(dir, dep.Infra.ConfigFileName, dep.Infra.Config); err != nil {
 			return "", err
 		}
