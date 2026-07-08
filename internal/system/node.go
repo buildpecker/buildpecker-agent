@@ -151,6 +151,48 @@ func IsNodeAlreadyConnectedToUser(userId string) (string, error) {
 	return "connected", nil
 }
 
+func RemoveNodeInfo(userId string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("[RemoveNodeInfo] Could not load home directory: %v", err)
+	}
+
+	configPath := filepath.Join(homeDir, ".buildpecker", "config.json")
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("no config file found")
+		}
+		return fmt.Errorf("[RemoveNodeInfo] Could not read config file: %v", err)
+	}
+
+	var cfg ctypes.Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("[RemoveNodeInfo] Could not unmarshal config: %v", err)
+	}
+
+	if _, ok := cfg.Nodes[userId]; !ok {
+		return fmt.Errorf("no node registered for user %s", userId)
+	}
+
+	delete(cfg.Nodes, userId)
+
+	newData, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("[RemoveNodeInfo] Could not marshal config: %v", err)
+	}
+
+	if err := os.WriteFile(configPath, newData, 0664); err != nil {
+		return fmt.Errorf("[RemoveNodeInfo] Could not write config: %v", err)
+	}
+
+	logger, _ := utils.GetLoggerInstance()
+	logger.SystemLogger.Printf("Removed node info userId=%s", userId)
+
+	return nil
+}
+
 func SaveNodeInfo(nodeToken string, userId string, nodeId string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {

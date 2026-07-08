@@ -9,7 +9,7 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "buildpecker-agent",
-	Short: "VPS Agent for buildpecker.sh",
+	Short: "VPS Agent for Buildpecker",
 	Args:  cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 

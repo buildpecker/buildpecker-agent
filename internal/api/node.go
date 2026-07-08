@@ -130,6 +130,37 @@ func RegisterNode(token string) error {
 	return nil
 }
 
+func DeregisterNode(userId string) error {
+	logger, _ := utils.GetLoggerInstance()
+
+	nodes, err := system.GetAllNodes()
+	if err != nil {
+		logger.ApiLogger.Printf("Deregister failed, could not read nodes: %v", err)
+		return fmt.Errorf("Deregister failed: %v", err)
+	}
+
+	node, ok := nodes[userId]
+	if !ok {
+		logger.ApiLogger.Printf("Deregister failed, no node registered for user %s", userId)
+		return fmt.Errorf("No node registered for user %s", userId)
+	}
+
+	logger.ApiLogger.Printf("Deregistering node userId=%s nodeId=%s", userId, node.NodeId)
+
+	if err := DeleteNode(node.NodeToken); err != nil {
+		logger.ApiLogger.Printf("Deregister failed, could not delete node remotely: %v", err)
+		return fmt.Errorf("Deregister failed: %v", err)
+	}
+
+	if err := system.RemoveNodeInfo(userId); err != nil {
+		logger.ApiLogger.Printf("Deregister failed, could not remove local node info: %v", err)
+		return fmt.Errorf("Deregister failed: %v", err)
+	}
+
+	logger.ApiLogger.Printf("Node deregistered userId=%s nodeId=%s", userId, node.NodeId)
+	return nil
+}
+
 func DeleteNode(nodeToken string) error {
 	logger, _ := utils.GetLoggerInstance()
 	_, err := CallHttpAction[any]("/nodes/delete-node", nil, true, nodeToken, http.MethodPost)
