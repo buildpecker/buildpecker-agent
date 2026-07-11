@@ -144,7 +144,7 @@ func IsNodeAlreadyConnectedToUser(userId string) (string, error) {
 	}
 
 	_, ok := cfg.Nodes[userId]
-	if ok {
+	if !ok {
 		return "not_connected", nil
 	}
 
