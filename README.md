@@ -39,7 +39,7 @@ The installer sets these up for you if they are missing:
 ## Install
 
 ```
-curl -fsSL https://raw.githubusercontent.com/buildpecker-paas/buildpecker-agent/refs/heads/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/buildpecker/buildpecker-agent/refs/heads/main/install.sh | sudo bash
 ```
 
 The installer:
@@ -127,5 +127,5 @@ output goes to `~/.buildpecker/daemon.log`.
 ## Uninstall
 
 ```
-curl -fsSL https://raw.githubusercontent.com/buildpecker-paas/buildpecker-agent/refs/heads/main/uninstall.sh | sudo bash -s -- -y
+curl -fsSL https://raw.githubusercontent.com/buildpecker/buildpecker-agent/refs/heads/main/uninstall.sh | sudo bash -s -- -y
 ```
