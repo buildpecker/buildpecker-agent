@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	ctypes "github.com/pthsarmah/buildpecker-agent/types"
@@ -13,23 +14,116 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"syscall"
+	"time"
 )
 
-// runStreaming starts cmd and fans every stdout/stderr line, live, into each
-// non-nil sink. Replaces CombinedOutput so a long build is tailable per
-// deployment instead of dumped once on exit.
-func runStreaming(cmd *exec.Cmd, sinks ...*log.Logger) error {
+const (
+	// A cold nixpacks build (nix store fetch plus docker build) is legitimately
+	// slow; past this it is wedged, not working.
+	nixpacksBuildTimeout = 30 * time.Minute
+	// Build output is near continuous, so a long silence means a stuck step
+	// (unreachable registry, hung nix fetch) rather than slow progress.
+	nixpacksBuildIdleTimeout = 8 * time.Minute
+
+	// docker run -d on an image that already exists locally is quick.
+	dockerRunTimeout     = 3 * time.Minute
+	dockerRunIdleTimeout = 2 * time.Minute
+
+	dockerRemoveTimeout = 60 * time.Second
+
+	// Cadence of "still running" lines while a command produces no output, so a
+	// tailing user always sees the pipeline is alive.
+	progressInterval = 30 * time.Second
+
+	// Grace between killing a timed out process group and abandoning its pipes.
+	killGraceDelay = 10 * time.Second
+)
+
+// cmdLimits bounds one streamed command. Any field left zero disables that
+// particular guard.
+type cmdLimits struct {
+	total     time.Duration // hard cap on the whole command
+	idle      time.Duration // abort after this long with no output at all
+	heartbeat time.Duration // cadence of progress lines while output is silent
+}
+
+// runStreaming runs name/args under lim and fans every stdout/stderr line,
+// live, into each non-nil sink. Replaces CombinedOutput so a long build is
+// tailable per deployment instead of dumped once on exit, and bounds the
+// command so a wedged build fails with a reason instead of hanging the
+// deployment forever. label prefixes the timeout and progress lines.
+func runStreaming(ctx context.Context, lim cmdLimits, label, name string, args []string, sinks ...*log.Logger) error {
+	emit := func(format string, a ...any) {
+		for _, s := range sinks {
+			if s != nil {
+				s.Printf(format, a...)
+			}
+		}
+	}
+
+	if lim.total > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, lim.total)
+		defer cancel()
+	}
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	// nixpacks and docker both fork children; put the command in its own
+	// process group so a timeout takes the whole tree down with it.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return killGroup(cmd) }
+	cmd.WaitDelay = killGraceDelay
+
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
 	}
 	cmd.Stderr = cmd.Stdout // fold stderr into the same pipe
+
+	started := time.Now()
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+
+	var lastOutput atomic.Int64
+	lastOutput.Store(started.UnixNano())
+
+	var stalled atomic.Bool
+	watchDone := make(chan struct{})
+	if tick := watchInterval(lim); tick > 0 {
+		go func() {
+			t := time.NewTicker(tick)
+			defer t.Stop()
+			for {
+				select {
+				case <-watchDone:
+					return
+				case now := <-t.C:
+					silent := now.Sub(time.Unix(0, lastOutput.Load()))
+					if lim.idle > 0 && silent >= lim.idle {
+						stalled.Store(true)
+						emit("%s: no output for %s, aborting", label, lim.idle)
+						_ = killGroup(cmd)
+						return
+					}
+					if lim.heartbeat > 0 && silent >= lim.heartbeat {
+						emit("%s: still running, elapsed %s (silent for %s)",
+							label,
+							now.Sub(started).Round(time.Second),
+							silent.Round(time.Second),
+						)
+					}
+				}
+			}
+		}()
+	}
+
 	sc := bufio.NewScanner(pipe)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
+		lastOutput.Store(time.Now().UnixNano())
 		line := sc.Text()
 		for _, s := range sinks {
 			if s != nil {
@@ -37,7 +131,42 @@ func runStreaming(cmd *exec.Cmd, sinks ...*log.Logger) error {
 			}
 		}
 	}
-	return cmd.Wait()
+
+	err = cmd.Wait()
+	close(watchDone)
+
+	switch {
+	case stalled.Load():
+		return fmt.Errorf("%s produced no output for %s and was killed after %s",
+			label, lim.idle, time.Since(started).Round(time.Second))
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return fmt.Errorf("%s timed out after %s", label, lim.total)
+	case err != nil:
+		return err
+	}
+	return nil
+}
+
+// watchInterval is how often the watchdog wakes: fine enough to honour the
+// tighter of the two guards, zero when neither is set.
+func watchInterval(lim cmdLimits) time.Duration {
+	tick := lim.heartbeat
+	if lim.idle > 0 && (tick <= 0 || lim.idle < tick) {
+		tick = lim.idle
+	}
+	return tick
+}
+
+// killGroup SIGKILLs the command's whole process group, falling back to the
+// process itself if the group is already gone.
+func killGroup(cmd *exec.Cmd) error {
+	if cmd.Process == nil {
+		return nil
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		return cmd.Process.Kill()
+	}
+	return nil
 }
 
 func filterPublicEnvs(envs []ctypes.EnvVar, prefixes []string) []ctypes.EnvVar {
@@ -138,6 +267,8 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 	logger, _ := utils.GetLoggerInstance()
 	depLog, _ := logger.GetDeploymentLogger(dep.Id)
 
+	ctx := context.Background()
+
 	imageName := strings.TrimSuffix(path.Base(projectPath), ".git")
 	versionNo := "v1"
 
@@ -194,9 +325,13 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		}
 	}
 
-	cmd := exec.Command("nixpacks", nixargs...)
+	buildLimits := cmdLimits{
+		total:     nixpacksBuildTimeout,
+		idle:      nixpacksBuildIdleTimeout,
+		heartbeat: progressInterval,
+	}
 
-	if err := runStreaming(cmd, logger.DeployLogger, depLog); err != nil {
+	if err := runStreaming(ctx, buildLimits, "nixpacks build", "nixpacks", nixargs, logger.DeployLogger, depLog); err != nil {
 		logger.DeployLogger.Printf("Nixpack build failed dep=%s: %v", dep.Id, err)
 		if depLog != nil {
 			depLog.Printf("Nixpack build failed: %v", err)
@@ -213,8 +348,21 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		return 0, fmt.Errorf("could not allocate host port: %w", err)
 	}
 
-	rmCmd := exec.Command("docker", "rm", "-f", imageName)
-	if out, err := rmCmd.CombinedOutput(); err != nil {
+	rmCtx, cancelRm := context.WithTimeout(ctx, dockerRemoveTimeout)
+	rmCmd := exec.CommandContext(rmCtx, "docker", "rm", "-f", imageName)
+	out, rmErr := rmCmd.CombinedOutput()
+	cancelRm()
+	if rmErr != nil {
+		// A deadline here means the docker daemon itself is unresponsive, so
+		// the run below would hang too: fail now with a reason.
+		if errors.Is(rmCtx.Err(), context.DeadlineExceeded) {
+			logger.DeployLogger.Printf("Remove previous container timed out dep=%s name=%s after %s",
+				dep.Id, imageName, dockerRemoveTimeout)
+			if depLog != nil {
+				depLog.Printf("Removing previous container timed out after %s; docker may be unresponsive", dockerRemoveTimeout)
+			}
+			return 0, fmt.Errorf("docker rm timed out after %s", dockerRemoveTimeout)
+		}
 		logger.DeployLogger.Printf("No previous container to remove dep=%s name=%s: %s",
 			dep.Id, imageName, strings.TrimSpace(string(out)))
 	} else {
@@ -256,9 +404,13 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 		fmt.Sprintf("%s:%s", imageName, versionNo),
 	)
 
-	cmd = exec.Command("docker", args...)
+	runLimits := cmdLimits{
+		total:     dockerRunTimeout,
+		idle:      dockerRunIdleTimeout,
+		heartbeat: progressInterval,
+	}
 
-	if err := runStreaming(cmd, logger.DeployLogger, depLog); err != nil {
+	if err := runStreaming(ctx, runLimits, "docker run", "docker", args, logger.DeployLogger, depLog); err != nil {
 		logger.DeployLogger.Printf("Docker run failed dep=%s: %v", dep.Id, err)
 		if depLog != nil {
 			depLog.Printf("Docker run failed: %v", err)

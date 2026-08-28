@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,10 +9,17 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	ctypes "github.com/pthsarmah/buildpecker-agent/types"
 	"github.com/pthsarmah/buildpecker-agent/utils"
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	// Compose pulls images, so allow for a slow registry but not a stalled one.
+	composeUpTimeout     = 20 * time.Minute
+	composeUpIdleTimeout = 5 * time.Minute
 )
 
 var invalidProjectChars = regexp.MustCompile(`[^a-z0-9_-]+`)
@@ -186,8 +194,13 @@ func InfraDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar) ([]ctypes.PortMapE
 		"up", "-d", "--remove-orphans",
 	}
 
-	cmd := exec.Command("docker", args...)
-	if err := runStreaming(cmd, logger.DeployLogger, depLog); err != nil {
+	composeLimits := cmdLimits{
+		total:     composeUpTimeout,
+		idle:      composeUpIdleTimeout,
+		heartbeat: progressInterval,
+	}
+
+	if err := runStreaming(context.Background(), composeLimits, "docker compose up", "docker", args, logger.DeployLogger, depLog); err != nil {
 		return nil, fmt.Errorf("docker compose up failed: %w", err)
 	}
 
