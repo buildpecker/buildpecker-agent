@@ -7,6 +7,7 @@ import (
 	"fmt"
 	ctypes "github.com/pthsarmah/buildpecker-agent/types"
 	"github.com/pthsarmah/buildpecker-agent/utils"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -39,6 +41,10 @@ const (
 
 	// Grace between killing a timed out process group and abandoning its pipes.
 	killGraceDelay = 10 * time.Second
+
+	// Longest single log line kept intact; past this the scanner gives up and
+	// the rest of the stream is drained instead of streamed.
+	maxLogLine = 1024 * 1024
 )
 
 // cmdLimits bounds one streamed command. Any field left zero disables that
@@ -73,7 +79,29 @@ func runStreaming(ctx context.Context, lim cmdLimits, label, name string, args [
 	// nixpacks and docker both fork children; put the command in its own
 	// process group so a timeout takes the whole tree down with it.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return killGroup(cmd) }
+
+	// Signalling the group by negated pid is only safe until Wait reaps the
+	// process: after that the kernel may hand the pid to somebody else and the
+	// kill would land on an unrelated group. Both killers (os/exec's cancel
+	// goroutine and our watchdog) can still be in flight then, so gate them on
+	// the same reaped flag.
+	var (
+		procMu sync.Mutex
+		reaped bool
+	)
+	killTree := func() error {
+		procMu.Lock()
+		defer procMu.Unlock()
+		if reaped || cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
+	}
+
+	cmd.Cancel = killTree
 	cmd.WaitDelay = killGraceDelay
 
 	pipe, err := cmd.StdoutPipe()
@@ -105,7 +133,7 @@ func runStreaming(ctx context.Context, lim cmdLimits, label, name string, args [
 					if lim.idle > 0 && silent >= lim.idle {
 						stalled.Store(true)
 						emit("%s: no output for %s, aborting", label, lim.idle)
-						_ = killGroup(cmd)
+						_ = killTree()
 						return
 					}
 					if lim.heartbeat > 0 && silent >= lim.heartbeat {
@@ -121,7 +149,7 @@ func runStreaming(ctx context.Context, lim cmdLimits, label, name string, args [
 	}
 
 	sc := bufio.NewScanner(pipe)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), maxLogLine)
 	for sc.Scan() {
 		lastOutput.Store(time.Now().UnixNano())
 		line := sc.Text()
@@ -131,8 +159,18 @@ func runStreaming(ctx context.Context, lim cmdLimits, label, name string, args [
 			}
 		}
 	}
+	if scanErr := sc.Err(); scanErr != nil {
+		// Nobody is reading the pipe any more, so the command would block on a
+		// full buffer and the watchdog would report a stall that never
+		// happened. Say what actually went wrong, then keep the pipe moving.
+		emit("%s: log stream stopped (%v); remaining output dropped", label, scanErr)
+		drain(pipe, &lastOutput)
+	}
 
 	err = cmd.Wait()
+	procMu.Lock()
+	reaped = true
+	procMu.Unlock()
 	close(watchDone)
 
 	switch {
@@ -157,16 +195,20 @@ func watchInterval(lim cmdLimits) time.Duration {
 	return tick
 }
 
-// killGroup SIGKILLs the command's whole process group, falling back to the
-// process itself if the group is already gone.
-func killGroup(cmd *exec.Cmd) error {
-	if cmd.Process == nil {
-		return nil
+// drain discards whatever the command still writes after the line scanner gave
+// up, so the child never blocks on a full pipe. It keeps the last-output clock
+// fresh: a command in this state is still making progress, just unloggable.
+func drain(r io.Reader, lastOutput *atomic.Int64) {
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			lastOutput.Store(time.Now().UnixNano())
+		}
+		if err != nil {
+			return
+		}
 	}
-	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
-		return cmd.Process.Kill()
-	}
-	return nil
 }
 
 func filterPublicEnvs(envs []ctypes.EnvVar, prefixes []string) []ctypes.EnvVar {
@@ -350,6 +392,9 @@ func NixpackDeploy(dep ctypes.Deployment, envs []ctypes.EnvVar, projectPath stri
 
 	rmCtx, cancelRm := context.WithTimeout(ctx, dockerRemoveTimeout)
 	rmCmd := exec.CommandContext(rmCtx, "docker", "rm", "-f", imageName)
+	// Without a WaitDelay the deadline kills docker but Wait still blocks on
+	// the output pipe for as long as any inherited child holds it open.
+	rmCmd.WaitDelay = killGraceDelay
 	out, rmErr := rmCmd.CombinedOutput()
 	cancelRm()
 	if rmErr != nil {

@@ -66,6 +66,7 @@ func handleInfraHealth(target ctypes.InfraHealthTarget) {
 		)
 	}
 
+	cmd.WaitDelay = killGraceDelay
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		logger.DeployLogger.Printf("Infra health dep=%s project=%s unhealthy: %v", target.DeploymentId, project, err)

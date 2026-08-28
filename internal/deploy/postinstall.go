@@ -38,6 +38,7 @@ func handlePostInstall(run ctypes.PostInstallRun) {
 		)
 	}
 
+	cmd.WaitDelay = killGraceDelay
 	out, err := cmd.CombinedOutput()
 	exitCode := 0
 	if err != nil {
